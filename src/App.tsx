@@ -2,7 +2,7 @@ import { AuthProvider } from './AuthProvider'
 import { useAuth } from './auth-context'
 import { AuthScreen } from './AuthScreen'
 import { TeacherDialogPanel } from './TeacherDialogPanel'
-import { DialogList } from './DialogList'
+import ListLevels from './ListLevels'
 
 import './App.css'
 
@@ -39,11 +39,10 @@ function AppContent() {
         </button>
       </header>
 
-      {/* Everyone reads the dialog list, newest first; teachers also get the
-          authoring form alongside it, and an Edit button on each list row. */}
+      {/* Teachers get the dialog authoring form. */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, padding: '0 20px' }}>
         {user.role === 'teacher' && <TeacherDialogPanel />}
-        <DialogList />
+        <ListLevels />
       </div>
     </>
   )
