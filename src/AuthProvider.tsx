@@ -4,6 +4,10 @@ import { AuthContext, type AuthUser } from './auth-context';
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 const TOKEN_KEY = 'authToken';
 
+// This app is for admins only; other roles are turned away at sign-in.
+const ALLOWED_ROLE = 'admin';
+const NOT_ADMIN_MESSAGE = 'Only admins can sign in to this app.';
+
 interface AuthResponse {
   token: string;
   user: AuthUser;
@@ -48,6 +52,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         if (!res.ok) throw new Error('invalid token');
         const me = (await res.json()) as AuthUser;
+        // A stored token for a non-admin (e.g. from before this check existed,
+        // or a role change) is treated like an invalid one.
+        if (me.role !== ALLOWED_ROLE) throw new Error(NOT_ADMIN_MESSAGE);
         if (!cancelled) setUser(me);
       } catch {
         if (!cancelled) {
@@ -64,7 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [token]);
 
+  // Only admins get a session; anyone else gets an error shown on the login screen.
   const applySession = useCallback((res: AuthResponse) => {
+    if (res.user.role !== ALLOWED_ROLE) {
+      throw new Error(NOT_ADMIN_MESSAGE);
+    }
     localStorage.setItem(TOKEN_KEY, res.token);
     setToken(res.token);
     setUser(res.user);

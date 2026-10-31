@@ -11,6 +11,7 @@ export function AuthScreen() {
   const [mode, setMode] = useState<Mode>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -70,13 +71,22 @@ export function AuthScreen() {
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           Password
           <input
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
             autoComplete={isRegister ? 'new-password' : 'current-password'}
             style={{ padding: 8 }}
           />
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={showPassword}
+            onChange={(e) => setShowPassword(e.target.checked)}
+          />
+          Show password
         </label>
 
         {error && (

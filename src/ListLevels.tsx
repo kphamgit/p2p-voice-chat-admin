@@ -9,10 +9,12 @@ interface Level {
   id: number;
   name: string;
   levelNumber: number;
+  description: string | null;
 }
 
 interface LevelDataRowProps extends genericItemType {
   name: string;
+  description: string;
 }
 
 // Load levels ordered by level number, mapped to the table's row shape.
@@ -20,7 +22,12 @@ async function fetchLevels(token: string | null): Promise<LevelDataRowProps[]> {
   const data = await apiFetch<Level[]>('/levels', token);
   return data
     .sort((a, b) => a.levelNumber - b.levelNumber)
-    .map((level) => ({ itemId: String(level.id), item_number: level.levelNumber, name: level.name }));
+    .map((level) => ({
+      itemId: String(level.id),
+      item_number: level.levelNumber,
+      name: level.name,
+      description: level.description ?? '',
+    }));
 }
 
 // Lists levels in a drag-sortable table, with forms to add a new level and
@@ -33,6 +40,7 @@ export default function ListLevels() {
   // New-level form
   const [newName, setNewName] = useState('');
   const [newNumber, setNewNumber] = useState('');
+  const [newDescription, setNewDescription] = useState('');
 
   // Edit form; null when no row is being edited
   const [editing, setEditing] = useState<LevelDataRowProps | null>(null);
@@ -69,9 +77,13 @@ export default function ListLevels() {
       ? Number(newNumber)
       : levels.reduce((max, l) => Math.max(max, l.item_number), 0) + 1;
     try {
-      await apiFetch('/levels', token, { method: 'POST', body: { name: newName.trim(), levelNumber } });
+      await apiFetch('/levels', token, {
+        method: 'POST',
+        body: { name: newName.trim(), levelNumber, description: newDescription.trim() || null },
+      });
       setNewName('');
       setNewNumber('');
+      setNewDescription('');
       await getLevels();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create level.');
@@ -84,7 +96,12 @@ export default function ListLevels() {
     try {
       await apiFetch(`/levels/${editing.itemId}`, token, {
         method: 'PUT',
-        body: { name: editing.name.trim(), levelNumber: editing.item_number },
+        // An emptied description is stored as null rather than ''.
+        body: {
+          name: editing.name.trim(),
+          levelNumber: editing.item_number,
+          description: editing.description.trim() || null,
+        },
       });
       setEditing(null);
       await getLevels();
@@ -131,6 +148,7 @@ export default function ListLevels() {
       },
       { accessorKey: 'item_number', header: 'Level Number' },
       { accessorKey: 'name', header: 'Name' },
+      { accessorKey: 'description', header: 'Description' },
       { accessorKey: 'itemId', header: 'Level ID' },
     ],
     [],
@@ -176,6 +194,12 @@ export default function ListLevels() {
             required
             className={`${inputClass} w-24`}
           />
+          <input
+            value={editing.description}
+            onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+            placeholder="Description (optional)"
+            className={`${inputClass} w-72`}
+          />
           <button type="submit" className={buttonClass}>Save</button>
           <button type="button" onClick={() => setEditing(null)} className={buttonClass}>Cancel</button>
         </form>
@@ -196,6 +220,12 @@ export default function ListLevels() {
           onChange={(e) => setNewNumber(e.target.value)}
           placeholder="Number (auto)"
           className={`${inputClass} w-36`}
+        />
+        <input
+          value={newDescription}
+          onChange={(e) => setNewDescription(e.target.value)}
+          placeholder="Description (optional)"
+          className={`${inputClass} w-72`}
         />
         <button type="submit" className={`${buttonClass} bg-green-600 text-white`}>Add Level</button>
       </form>

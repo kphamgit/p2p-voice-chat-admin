@@ -1,15 +1,20 @@
+import { useState } from 'react'
 import { AuthProvider } from './AuthProvider'
 import { useAuth } from './auth-context'
 import { AuthScreen } from './AuthScreen'
-import { TeacherDialogPanel } from './TeacherDialogPanel'
 import ListLevels from './ListLevels'
+import ListUsers from './ListUsers'
+import DialogsManager from './DialogsManager'
 
 import './App.css'
+
+type Tab = 'levels' | 'users' | 'dialogs'
 
 // Gate the app: an unauthenticated user only ever sees the login/register
 // screen, so no dialog data is fetched until they are signed in.
 function AppContent() {
   const { user, loading, logout } = useAuth()
+  const [tab, setTab] = useState<Tab>('levels')
 
   if (loading) {
     return <p style={{ padding: 20, fontFamily: 'sans-serif' }}>Loading…</p>
@@ -18,6 +23,12 @@ function AppContent() {
   if (!user) {
     return <AuthScreen />
   }
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'levels', label: 'Levels' },
+    { id: 'users', label: 'Users' },
+    { id: 'dialogs', label: 'Dialogs Manager' },
+  ]
 
   return (
     <>
@@ -32,18 +43,36 @@ function AppContent() {
         }}
       >
         <span>
-          Signed in as <strong>{user.name}</strong>
+          Signed in as <strong>{user.name}</strong> ({user.role})
         </span>
         <button onClick={logout} style={{ padding: '6px 12px' }}>
           Log out
         </button>
       </header>
 
-      {/* Teachers get the dialog authoring form. */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, padding: '0 20px' }}>
-        {user.role === 'teacher' && <TeacherDialogPanel />}
+      <nav className="flex gap-1 border-b border-[var(--border)] px-5 pt-3">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`-mb-px rounded-t border px-4 py-2 ${
+              tab === t.id
+                ? 'border-[var(--border)] border-b-[var(--bg)] bg-[var(--bg)] font-semibold text-[var(--text-h)]'
+                : 'border-transparent hover:text-[var(--text-h)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'users' ? (
+        <ListUsers />
+      ) : tab === 'dialogs' ? (
+        <DialogsManager />
+      ) : (
         <ListLevels />
-      </div>
+      )}
     </>
   )
 }

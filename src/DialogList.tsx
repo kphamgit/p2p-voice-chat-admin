@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './auth-context';
 
 // List of dialog/conversation scripts, newest first. Any authenticated user may
-// read them (GET /dialogs); teachers additionally get an Edit button per row,
-// since PUT /dialogs/:id is gated by requireRole('teacher') on the backend.
+// read them (GET /dialogs); admins additionally get an Edit button per row,
+// since PUT /dialogs/:id is gated by an admin role check on the backend.
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
 interface Dialog {
@@ -20,7 +20,7 @@ function authHeaders(): Record<string, string> {
 
 export function DialogList() {
   const { user } = useAuth();
-  const canEdit = user?.role === 'teacher';
+  const canEdit = user?.role === 'admin';
 
   const [dialogs, setDialogs] = useState<Dialog[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');

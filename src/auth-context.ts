@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react';
 
 // The authenticated user, mirroring what the backend returns from
 // /auth/login, /auth/register, and /auth/me. `name` is the login username;
-// `role` drives authorization (e.g. "teacher" unlocks the dialog editor).
+// `role` drives authorization (e.g. "admin" unlocks the dialog editor).
 export interface AuthUser {
   id: number;
   name: string;
