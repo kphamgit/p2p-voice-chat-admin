@@ -10,11 +10,18 @@ interface User {
   createdAt: string;
 }
 
-// Read-only table of every user.
+const ROLES = ['student', 'admin'];
+
+// Table of every user. Each row's Edit button opens a form below the table to
+// change the username and role (PUT /users/:id, admin-only on the backend).
 export default function ListUsers() {
-  const { token } = useAuth();
+  const { token, user: me } = useAuth();
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Edit form; null when no row is being edited
+  const [editing, setEditing] = useState<User | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +37,28 @@ export default function ListUsers() {
       cancelled = true;
     };
   }, [token]);
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const saved = await apiFetch<User>(`/users/${editing.id}`, token, {
+        method: 'PUT',
+        body: { name: editing.name.trim(), role: editing.role },
+      });
+      setUsers((prev) => prev?.map((u) => (u.id === saved.id ? saved : u)) ?? null);
+      setEditing(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update user.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Admins can't remove their own admin role (the backend refuses it too).
+  const isEditingSelf = editing !== null && editing.id === me?.id;
 
   return (
     <div className="p-5 text-left">
@@ -53,6 +82,7 @@ export default function ListUsers() {
               <th className={`${cellClass} text-left`}>Username</th>
               <th className={`${cellClass} text-left`}>Role</th>
               <th className={`${cellClass} text-left`}>Created</th>
+              <th className={`${cellClass} text-left`}>Edit</th>
             </tr>
           </thead>
           <tbody>
@@ -62,13 +92,57 @@ export default function ListUsers() {
                 <td className={cellClass}>{u.name}</td>
                 <td className={cellClass}>{u.role}</td>
                 <td className={cellClass}>{new Date(u.createdAt).toLocaleString()}</td>
+                <td className={cellClass}>
+                  <button
+                    onClick={() => setEditing({ ...u })}
+                    className="my-1 rounded bg-blue-600 px-2 font-bold text-white hover:opacity-90"
+                  >
+                    Edit
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+
+      {editing && (
+        <form onSubmit={saveEdit} className="mt-4 flex flex-wrap items-center gap-2">
+          <strong>Edit user {editing.id}</strong>
+          <input
+            value={editing.name}
+            onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+            placeholder="Username"
+            required
+            className={inputClass}
+          />
+          <select
+            value={editing.role}
+            onChange={(e) => setEditing({ ...editing, role: e.target.value })}
+            disabled={isEditingSelf}
+            title={isEditingSelf ? "You can't change your own role." : undefined}
+            className={inputClass}
+          >
+            {ROLES.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+          <button type="submit" disabled={saving} className={buttonClass}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button type="button" onClick={() => setEditing(null)} disabled={saving} className={buttonClass}>
+            Cancel
+          </button>
+        </form>
       )}
     </div>
   );
 }
 
 const cellClass = 'border-b border-[var(--border)] px-2 py-1';
+
+const inputClass = 'rounded border border-gray-300 p-1.5';
+
+const buttonClass = 'rounded border border-gray-300 px-3 py-1.5 hover:opacity-90 disabled:opacity-50';

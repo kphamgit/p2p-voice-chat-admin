@@ -56,6 +56,7 @@ interface GenericTableProps<T extends genericItemType> {
   columns: ColumnDef<T>[];
   on_edit?: (row: T) => void; // show an Edit button that hands the row to the parent
   on_delete?: (row: T) => Promise<void> | void; // show a Delete button; the row is removed locally once this resolves
+  on_clone?: (row: T) => Promise<void> | void; // show a Clone button; the parent creates the copy and refreshes input_data
   on_renumber?: (rows: T[]) => Promise<void> | void; // called with the rows renumbered 1..n in their current (dragged) order
   show_renumber_button?: boolean; // show the built-in "Renumber Items" button (default true)
   ref?: React.Ref<GenericSortableTableHandleProps<T>>;
@@ -105,6 +106,7 @@ function GenericSortableTable<T extends genericItemType>({
   columns,
   on_edit,
   on_delete,
+  on_clone,
   on_renumber,
   show_renumber_button = true,
   ref,
@@ -162,6 +164,17 @@ function GenericSortableTable<T extends genericItemType>({
       cell: (info) => (
         <button className={`${actionButtonClass} bg-red-600`} onClick={() => delete_row(info.row.original)}>
           Delete
+        </button>
+      ),
+    });
+  }
+  if (on_clone) {
+    actionColumns.push({
+      id: 'clone_generic',
+      header: 'Clone',
+      cell: (info) => (
+        <button className={`${actionButtonClass} bg-green-600`} onClick={() => on_clone(info.row.original)}>
+          Clone
         </button>
       ),
     });

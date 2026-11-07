@@ -3,6 +3,7 @@ import { type ColumnDef } from '@tanstack/react-table';
 import { useAuth } from './auth-context';
 import { apiFetch } from './api';
 import GenericSortableTable, { RowDragHandleCell, type genericItemType } from './GenericSortableTable';
+import ListUnits from './ListUnits';
 
 // A level as returned by the backend's /levels endpoints.
 interface Level {
@@ -44,6 +45,9 @@ export default function ListLevels() {
 
   // Edit form; null when no row is being edited
   const [editing, setEditing] = useState<LevelDataRowProps | null>(null);
+
+  // The level whose units are shown instead of the levels table; null shows the levels.
+  const [selectedLevel, setSelectedLevel] = useState<LevelDataRowProps | null>(null);
 
   // Refetch after a write; the initial load happens in the effect below.
   const getLevels = useCallback(async () => {
@@ -147,12 +151,27 @@ export default function ListLevels() {
         size: 60,
       },
       { accessorKey: 'item_number', header: 'Level Number' },
-      { accessorKey: 'name', header: 'Name' },
+      {
+        accessorKey: 'name',
+        header: 'Name',
+        cell: (info) => (
+          <button
+            onClick={() => setSelectedLevel(info.row.original)}
+            className="text-blue-600 underline hover:opacity-80"
+          >
+            {info.row.original.name}
+          </button>
+        ),
+      },
       { accessorKey: 'description', header: 'Description' },
       { accessorKey: 'itemId', header: 'Level ID' },
     ],
     [],
   );
+
+  if (selectedLevel) {
+    return <ListUnits level={selectedLevel} onBack={() => setSelectedLevel(null)} />;
+  }
 
   return (
     <div className="p-5 text-left">
