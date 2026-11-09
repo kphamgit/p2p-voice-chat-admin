@@ -1,0 +1,16 @@
+.my-custom-class {
+    font-family: Arial, sans-serif;
+    font-size: 16px;
+    color: var(--text-primary);
+    line-height: 1.5;
+   background-color: var(--surface);
+   height: 220px;
+   padding: 10px;
+  }
+/* Vocabulary words tied to a dictionary sense (SenseMark), so the teacher can see them while editing. */
+.my-custom-class .sense-word {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  background-color: var(--accent-soft);
+  border-radius: 3px;
+}

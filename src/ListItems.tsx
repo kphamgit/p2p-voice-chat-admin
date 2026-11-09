@@ -4,7 +4,7 @@ import { useAuth } from './auth-context';
 import { apiFetch } from './api';
 import GenericSortableTable, { RowDragHandleCell, type genericItemType } from './GenericSortableTable';
 import { ItemFormModal } from './ItemFormModal';
-import { type QuestionItem } from './item';
+import { QUESTION_FORMATS, type QuestionItem } from './item';
 
 // The full item rides along on each row so Edit can prefill the form.
 interface ItemDataRowProps extends genericItemType {
@@ -36,6 +36,8 @@ export default function ListItems({ itemGroup, onBack }: Props) {
   const { token } = useAuth();
   const [items, setItems] = useState<ItemDataRowProps[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Format for the next new item, picked in the dropdown beside "Add Item".
+  const [newFormat, setNewFormat] = useState<number>(QUESTION_FORMATS[0].value);
 
   // Which item the form modal is open for: 'new', an existing item, or closed.
   const [formFor, setFormFor] = useState<QuestionItem | 'new' | null>(null);
@@ -116,9 +118,13 @@ export default function ListItems({ itemGroup, onBack }: Props) {
       { id: 'questionText', header: 'Question Text', cell: ({ row }) => truncatedCell(row.original.item.questionText) },
       { id: 'answerKey', header: 'Answer Key', cell: ({ row }) => truncatedCell(row.original.item.answerKey) },
       { id: 'choices', header: 'Choices', cell: ({ row }) => truncatedCell(row.original.item.choices) },
+      // Format only means something for questions, so it's shown only in "question" groups.
+      ...(itemGroup.itemType === 'question'
+        ? [{ id: 'format', header: 'Format', cell: ({ row }) => row.original.item.format } as ColumnDef<ItemDataRowProps>]
+        : []),
       { accessorKey: 'itemId', header: 'Item ID' },
     ],
-    [],
+    [itemGroup.itemType],
   );
 
   return (
@@ -135,12 +141,29 @@ export default function ListItems({ itemGroup, onBack }: Props) {
         </p>
       )}
 
-      <button
-        onClick={() => setFormFor('new')}
-        className="my-3 rounded-lg bg-green-600 px-4 py-2 font-bold text-white hover:opacity-90"
-      >
-        Add Item
-      </button>
+      <div className="my-3 flex items-center gap-2">
+        <button
+          onClick={() => setFormFor('new')}
+          className="rounded-lg bg-green-600 px-4 py-2 font-bold text-white hover:opacity-90"
+        >
+          Add Item
+        </button>
+        {/* Format only applies to questions; the chosen one prefills the new item's form. */}
+        {itemGroup.itemType === 'question' && (
+          <select
+            value={newFormat}
+            onChange={(e) => setNewFormat(Number(e.target.value))}
+            aria-label="Format for new item"
+            className="rounded border border-gray-300 p-2"
+          >
+            {QUESTION_FORMATS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label} ({value})
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
 
       {items.length > 0 ? (
         <GenericSortableTable
@@ -164,6 +187,7 @@ export default function ListItems({ itemGroup, onBack }: Props) {
           item={formFor === 'new' ? undefined : formFor}
           // A new item defaults to one past the current highest number.
           defaultItemNumber={items.reduce((max, i) => Math.max(max, i.item_number), 0) + 1}
+          defaultFormat={newFormat}
           onSaved={() => {
             setFormFor(null);
             getItems();

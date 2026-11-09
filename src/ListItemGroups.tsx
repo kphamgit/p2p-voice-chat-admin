@@ -4,14 +4,14 @@ import { useAuth } from './auth-context';
 import { apiFetch } from './api';
 import GenericSortableTable, { RowDragHandleCell, type genericItemType } from './GenericSortableTable';
 import ListItems from './ListItems';
-import { ITEM_TYPES, type ItemType } from './item';
+import { DISPLAY_TYPES, ITEM_TYPES, type ItemDisplayType, type ItemType } from './item';
 
 // An item group as returned by the backend's /item-groups and /units/:id/item-groups endpoints.
 interface ItemGroup {
   id: number;
   itemGroupNumber: number;
   description: string | null;
-  displayType: string | null;
+  displayType: ItemDisplayType | null;
   itemType: ItemType | null;
   unitId: number;
   _count: { questionItems: number }; // included by GET /units/:id/item-groups
@@ -99,7 +99,7 @@ export default function ListItemGroups({ unit, onBack }: Props) {
           itemGroupNumber,
           unitId: Number(unit.itemId),
           description: newDescription.trim() || null,
-          displayType: newDisplayType.trim() || null,
+          displayType: newDisplayType || null,
           itemType: newItemType || null,
         },
       });
@@ -123,7 +123,7 @@ export default function ListItemGroups({ unit, onBack }: Props) {
         body: {
           itemGroupNumber: editing.item_number,
           description: editing.description.trim() || null,
-          displayType: editing.displayType.trim() || null,
+          displayType: editing.displayType || null,
           itemType: editing.itemType || null,
         },
       });
@@ -248,11 +248,9 @@ export default function ListItemGroups({ unit, onBack }: Props) {
             placeholder="Description (optional)"
             className={`${inputClass} w-72`}
           />
-          <input
+          <DisplayTypeSelect
             value={editing.displayType}
-            onChange={(e) => setEditing({ ...editing, displayType: e.target.value })}
-            placeholder="Display type (optional)"
-            className={`${inputClass} w-48`}
+            onChange={(displayType) => setEditing({ ...editing, displayType })}
           />
           <ItemTypeSelect value={editing.itemType} onChange={(itemType) => setEditing({ ...editing, itemType })} />
           <button type="submit" className={buttonClass}>Save</button>
@@ -275,12 +273,7 @@ export default function ListItemGroups({ unit, onBack }: Props) {
           placeholder="Description (optional)"
           className={`${inputClass} w-72`}
         />
-        <input
-          value={newDisplayType}
-          onChange={(e) => setNewDisplayType(e.target.value)}
-          placeholder="Display type (optional)"
-          className={`${inputClass} w-48`}
-        />
+        <DisplayTypeSelect value={newDisplayType} onChange={setNewDisplayType} />
         <ItemTypeSelect value={newItemType} onChange={setNewItemType} />
         <button type="submit" className={`${buttonClass} bg-green-600 text-white`}>Add Item Group</button>
       </form>
@@ -299,6 +292,25 @@ function ItemTypeSelect({ value, onChange }: { value: string; onChange: (value: 
     >
       <option value="">Item type (none)</option>
       {ITEM_TYPES.map((type) => (
+        <option key={type} value={type}>
+          {type}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// Dropdown for an item group's display type; '' means none (stored as null).
+function DisplayTypeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label="Display type"
+      className={`${inputClass} w-48`}
+    >
+      <option value="">Display type (none)</option>
+      {DISPLAY_TYPES.map((type) => (
         <option key={type} value={type}>
           {type}
         </option>

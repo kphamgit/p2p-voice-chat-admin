@@ -15,8 +15,16 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@tanstack/react-table": "^8.21.3",
+    "@tiptap/core": "3.33.0",
+    "@tiptap/extension-color": "3.33.0",
+    "@tiptap/extension-text-align": "3.33.0",
+    "@tiptap/extension-text-style": "3.33.0",
+    "@tiptap/pm": "3.33.0",
+    "@tiptap/react": "3.33.0",
+    "@tiptap/starter-kit": "3.33.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "tiptap-extension-resizable-image": "2.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

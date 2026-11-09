@@ -111,3 +111,38 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* ---------------------------------------------------------------------------
+   Tokens used by the Tiptap editor copied from phuyenenglish.net
+   (src/components/tiptap_editor): bg-surface, text-content, border-default,
+   bg-accent-soft, bg-success-soft, text-accent-contrast, and var(--surface) /
+   var(--text-primary) / var(--accent-soft) in its CSS. Values match that app;
+   border-default reuses this app's --border. `inline` makes each utility read
+   the variable at use time, so the dark-mode values below take effect.
+--------------------------------------------------------------------------- */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-content: var(--text-primary);
+  --color-default: var(--border);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-soft: var(--accent-soft);
+  --color-success-soft: var(--success-soft);
+}
+
+:root {
+  --surface: #ffffff;
+  --text-primary: #000000;
+  --accent-contrast: #ffffff;
+  --accent-soft: #bfdbfe;
+  --success-soft: #bbf7d0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1e293b;
+    --text-primary: #ffffff;
+    --accent-contrast: #ffffff;
+    --accent-soft: #1e3a5f;
+    --success-soft: #14432a;
+  }
+}
