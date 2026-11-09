@@ -255,19 +255,39 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               />
             </label>
             {uploading > 0 && <p className="m-0 text-sm">Uploading image…</p>}
-            {mediaImageUrls(media).length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {mediaImageUrls(media).map((url, i) => (
-                  <img
-                    key={`${url}-${i}`}
-                    src={url}
-                    // Load with CORS, like the Flutter web app does. Otherwise the
-                    // browser caches a copy without CORS headers (for a year) and
-                    // then refuses it to the Flutter app on the same localhost.
-                    crossOrigin="anonymous"
-                    alt={`Media image ${i + 1}`}
-                    className="h-20 rounded border border-gray-300 object-contain"
-                  />
+            {mediaImages(media).length > 0 && (
+              <div className="flex flex-wrap gap-3">
+                {mediaImages(media).map(({ url, size }, i) => (
+                  <div key={`${url}-${i}`} className="flex flex-col items-start gap-1">
+                    <img
+                      src={url}
+                      // Load with CORS, like the Flutter web app does. Otherwise the
+                      // browser caches a copy without CORS headers (for a year) and
+                      // then refuses it to the Flutter app on the same localhost.
+                      crossOrigin="anonymous"
+                      alt={`Media image ${i + 1}`}
+                      className="h-20 rounded border border-gray-300 object-contain"
+                    />
+                    {/* How wide the student app shows it, as a share of the question's width
+                        (written into the media text as ![50%](url)). */}
+                    <select
+                      value={size ?? ''}
+                      onChange={(e) =>
+                        setMedia((m) => withImageSize(m, i, e.target.value ? Number(e.target.value) : null))
+                      }
+                      aria-label={`Display size of media image ${i + 1}`}
+                      className="rounded border border-gray-300 p-1 text-sm"
+                    >
+                      <option value="">Default size</option>
+                      {/* A size typed into the text by hand that isn't in the list still shows. */}
+                      {size !== null && !IMAGE_SIZES.includes(size) && <option value={size}>{size}% width</option>}
+                      {IMAGE_SIZES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}% width
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 ))}
               </div>
             )}
@@ -405,8 +425,31 @@ function explanationHtml(editor: EditorRef | null): string | null {
 }
 
 // The image URLs in media text, in order: each ![...](<url>).
-function mediaImageUrls(media: string): string[] {
-  return Array.from(media.matchAll(/!\[[^\]]*\]\((\S+?)\)/g), (m) => m[1]);
+// The images in the media text, ![<alt>](<url>), in order. The alt slot holds
+// an image's display size in the student app, e.g. ![50%](url): that share of
+// the question's width. An image without one (![](url)) gets the default size.
+const MEDIA_IMAGE = /!\[([^\]]*)\]\((\S+?)\)/g;
+
+// The sizes offered in each image's size picker, in % of the question's width.
+const IMAGE_SIZES = [25, 50, 75, 100];
+
+function mediaImages(media: string): { url: string; size: number | null }[] {
+  return Array.from(media.matchAll(MEDIA_IMAGE), (m) => ({ url: m[2], size: imageSize(m[1]) }));
+}
+
+// "50%" → 50; null for anything else (no size, or out of 1–100).
+function imageSize(alt: string): number | null {
+  const match = /^\s*(\d{1,3})\s*%\s*$/.exec(alt);
+  const size = match ? Number(match[1]) : NaN;
+  return size >= 1 && size <= 100 ? size : null;
+}
+
+// The media text with its `index`-th image's size set (null: default size).
+function withImageSize(media: string, index: number, size: number | null): string {
+  let n = 0;
+  return media.replace(MEDIA_IMAGE, (whole, _alt: string, url: string) =>
+    n++ === index ? `![${size === null ? '' : `${size}%`}](${url})` : whole,
+  );
 }
 
 // The choices string's options, as the student app splits them ("am/is/are").
