@@ -26,3 +26,25 @@ export async function apiFetch<T = unknown>(
   }
   return data as T;
 }
+
+// Like apiFetch, but for a binary response (e.g. MP3 audio from /tts): returns
+// it as a Blob. Errors still arrive as JSON { message }.
+export async function apiFetchBlob(
+  path: string,
+  token: string | null,
+  init: { method?: string; body?: unknown } = {},
+): Promise<Blob> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: init.method ?? 'GET',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error((data as { message?: string } | null)?.message ?? `Request failed (${res.status})`);
+  }
+  return res.blob();
+}

@@ -28,7 +28,19 @@ export interface QuestionItem {
   choices: string | null;
   format: number;
   media: string | null; // text with inline images, ![](<url>)
+  audio: string | null; // public S3 URL of the question's MP3 (generated speech)
+  audioText: string | null; // the text the audio speaks
+  voiceName: string | null; // id of the voice that speaks it (mostly ElevenLabs)
   explanation: string | null;
   showExplanationWhenCorrect: boolean; // explanation also after a correct answer
+  itemGroupId: number;
+}
+
+// A text item as returned by the backend's /item-groups/:id/text-items endpoint.
+export interface TextItem {
+  id: number;
+  itemNumber: number;
+  content: string;
+  media: string | null; // optional text with inline media
   itemGroupId: number;
 }

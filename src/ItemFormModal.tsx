@@ -1,12 +1,16 @@
-import { useEffect, useRef, useState, type ClipboardEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SimpleEditor, { type EditorRef } from './components/tiptap_editor/SimpleEditor';
 import { useAuth } from './auth-context';
 import { apiFetch } from './api';
+import { MediaField } from './MediaField';
 import { QUESTION_FORMATS, type QuestionItem } from './item';
+import { TtsPickers } from './TtsControls';
+import { useTtsChoice } from './useTts';
 
 // Modal for authoring an item in an item group. Without an `item` it creates one
-// (POST /question-items, from the items page's "Add Item" button); with an `item` it is
-// prefilled and saves changes (PUT /question-items/:id, from a row's "Edit" button).
+// (POST /question-items, from the items page's "Add Item" button in a "question"
+// group); with an `item` it is prefilled and saves changes (PUT
+// /question-items/:id, from a question row's "Edit" button).
 // The parent item group's item type decides what is created: the question fields
 // only appear (and are only sent) when the group holds "question" items.
 // A "text" group's items, and items of a group with no type set, have just a number.
@@ -40,6 +44,18 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   // String for the same reason as itemNumber. New items start at defaultFormat.
   const [format, setFormat] = useState(String(item?.format ?? defaultFormat));
   const [media, setMedia] = useState(item?.media ?? '');
+  // The question's audio: the saved MP3's URL, or a voice just generated
+  // below (which only stays if the item is saved with it).
+  const [audio, setAudio] = useState<string | null>(item?.audio ?? null);
+  const [audioText, setAudioText] = useState(item?.audioText ?? '');
+  // Starts on the voice the question was saved with.
+  const tts = useTtsChoice(token, item?.voiceName);
+  // The voice that spoke `audio` (its id): set when a voice is generated,
+  // cleared with the audio. Picking another voice in the dropdown doesn't
+  // change it until that voice is generated.
+  const [voiceName, setVoiceName] = useState<string | null>(item?.audio ? (item.voiceName ?? null) : null);
+  const [generating, setGenerating] = useState(false);
+  const [audioFailed, setAudioFailed] = useState<string | null>(null); // the audio URL that wouldn't load
   // Explanation is rich text (HTML) from the Tiptap editor, read via its ref on save.
   const explanationEditor = useRef<EditorRef>(null);
   const [showExplanationWhenCorrect, setShowExplanationWhenCorrect] = useState(
@@ -73,38 +89,24 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   // slashes between the words.
   const isSlashSeparated = [6, 8].includes(Number(format));
 
-  // Pasting an image into Media uploads it and inserts ![](<url>) where the
-  // cursor was. Pasting text works as usual. A new item has no id yet, so its
-  // images go to a pending folder; the server moves them to the item's own
-  // folder when the item is saved (and deletes them after a day if it isn't).
-  const pasteIntoMedia = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const images = Array.from(e.clipboardData.items)
-      .filter((entry) => entry.kind === 'file' && entry.type.startsWith('image/'))
-      .map((entry) => entry.getAsFile())
-      .filter((file): file is File => file !== null);
-    if (images.length === 0) return; // plain text: let the browser paste it
-    e.preventDefault();
-    const uploadPath = isEdit ? `/question-items/${item.id}/images` : '/question-items/images';
-    const { selectionStart, selectionEnd } = e.currentTarget;
-    setUploading((n) => n + 1);
+  // Speak the audio text with the chosen voice and speed. The server stores
+  // the MP3 in a pending folder and returns its URL to play here; saving the
+  // item keeps it (and deletes the voice it replaces), closing without saving
+  // leaves the saved audio as it was. Generate again for another take.
+  const generateVoice = async () => {
+    setGenerating(true);
     setError(null);
     try {
-      const urls: string[] = [];
-      for (const image of images) {
-        const form = new FormData();
-        form.append('image', image);
-        const { url } = await apiFetch<{ url: string }>(uploadPath, token, {
-          method: 'POST',
-          body: form,
-        });
-        urls.push(url);
-      }
-      const inserted = urls.map((url) => `![](${url})`).join('\n');
-      setMedia((text) => text.slice(0, selectionStart) + inserted + text.slice(selectionEnd));
+      const { url } = await apiFetch<{ url: string }>('/question-items/audio', token, {
+        method: 'POST',
+        body: { text: audioText.trim(), ...tts.request },
+      });
+      setAudio(url);
+      setVoiceName(tts.request.voice);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Image upload failed.');
+      setError(err instanceof Error ? err.message : 'Generating the voice failed.');
     } finally {
-      setUploading((n) => n - 1);
+      setGenerating(false);
     }
   };
 
@@ -160,6 +162,9 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
             questionText: questionText.trim() || null,
             questionPrompt: questionPrompt.trim() || null,
             media: media.trim() || null,
+            audio,
+            audioText: audioText.trim() || null,
+            voiceName: audio ? voiceName : null,
             explanation: explanationHtml(explanationEditor.current),
             showExplanationWhenCorrect,
             answerKey: keyedChoice ? `choice${keyedChoice.number}` : answerKey.trim() || null,
@@ -191,7 +196,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
         className="flex max-h-[90vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg)] p-5 text-left shadow-[var(--shadow)]"
       >
         <h3 id="item-form-heading" className="m-0 text-xl font-semibold text-[var(--text-h)]">
-          {isEdit ? `Edit item ${item.id}` : 'Add Item'}
+          {isEdit ? `Edit item ${item.id}` : 'Add Question Item'}
         </h3>
 
         <label className={labelClass}>
@@ -243,54 +248,104 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               />
             </label>
 
-            <label className={labelClass}>
-              Media (optional)
-              <textarea
-                value={media}
-                onChange={(e) => setMedia(e.target.value)}
-                onPaste={pasteIntoMedia}
-                placeholder="Text, and paste images here (⌘V)"
-                rows={3}
-                className={`${inputClass} resize-y font-[inherit] leading-normal`}
-              />
-            </label>
-            {uploading > 0 && <p className="m-0 text-sm">Uploading image…</p>}
-            {mediaImages(media).length > 0 && (
-              <div className="flex flex-wrap gap-3">
-                {mediaImages(media).map(({ url, size }, i) => (
-                  <div key={`${url}-${i}`} className="flex flex-col items-start gap-1">
-                    <img
-                      src={url}
-                      // Load with CORS, like the Flutter web app does. Otherwise the
-                      // browser caches a copy without CORS headers (for a year) and
-                      // then refuses it to the Flutter app on the same localhost.
-                      crossOrigin="anonymous"
-                      alt={`Media image ${i + 1}`}
-                      className="h-20 rounded border border-gray-300 object-contain"
-                    />
-                    {/* How wide the student app shows it, as a share of the question's width
-                        (written into the media text as ![50%](url)). */}
-                    <select
-                      value={size ?? ''}
-                      onChange={(e) =>
-                        setMedia((m) => withImageSize(m, i, e.target.value ? Number(e.target.value) : null))
-                      }
-                      aria-label={`Display size of media image ${i + 1}`}
-                      className="rounded border border-gray-300 p-1 text-sm"
-                    >
-                      <option value="">Default size</option>
-                      {/* A size typed into the text by hand that isn't in the list still shows. */}
-                      {size !== null && !IMAGE_SIZES.includes(size) && <option value={size}>{size}% width</option>}
-                      {IMAGE_SIZES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}% width
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
+            <MediaField
+              media={media}
+              setMedia={setMedia}
+              uploadPath={isEdit ? `/question-items/${item.id}/images` : '/question-items/images'}
+              token={token}
+              uploading={uploading}
+              setUploading={setUploading}
+              setError={setError}
+              labelClass={labelClass}
+              inputClass={inputClass}
+            />
+
+            {/* A div, not a <label>: it holds several inputs and buttons. */}
+            <div className={`${labelClass} rounded border border-gray-300 p-3`}>
+              Audio (optional)
+              <label className={labelClass}>
+                <span className="text-sm font-normal text-gray-500">Audio text: what the voice says</span>
+                <input
+                  value={audioText}
+                  onChange={(e) => setAudioText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && audioText.trim() && tts.voice && !generating) generateVoice();
+                  }}
+                  placeholder="e.g. I am a student."
+                  className={inputClass}
+                />
+              </label>
+              {/* Read-only: the voice of the generated audio, saved as its id. */}
+              <div className={labelClass}>
+                <span className="text-sm font-normal text-gray-500">Voice name (the voice of the audio, set when you generate)</span>
+                <div className="flex flex-wrap items-baseline gap-x-2 rounded border border-gray-200 bg-gray-50 p-2 text-[var(--text-h)]">
+                  {audio && voiceName ? (
+                    <>
+                      <code className="text-sm">{voiceName}</code>
+                      {tts.voiceLabel(voiceName) && (
+                        <span className="text-sm text-gray-500">{tts.voiceLabel(voiceName)}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-sm text-gray-500">{audio ? 'Not recorded' : 'No audio'}</span>
+                  )}
+                </div>
               </div>
-            )}
+              <TtsPickers
+                choice={tts}
+                labelClass={labelClass}
+                hintClass="text-sm font-normal text-gray-500"
+                inputClass={inputClass}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={generateVoice}
+                  disabled={!audioText.trim() || !tts.voice || generating}
+                  className={buttonClass}
+                >
+                  {generating ? 'Generating…' : 'Generate voice'}
+                </button>
+                {audio && (
+                  <button type="button" onClick={() => {
+                      setAudio(null);
+                      setVoiceName(null);
+                    }}
+                    disabled={generating} className={buttonClass}>
+                    Remove audio
+                  </button>
+                )}
+              </div>
+              {audio && (
+                <>
+                  {/* crossOrigin for the same reason as the media images above. */}
+                  <audio
+                    key={audio}
+                    src={audio}
+                    controls
+                    autoPlay={audio !== item?.audio}
+                    crossOrigin="anonymous"
+                    onError={() => setAudioFailed(audio)}
+                    className="w-full"
+                  />
+                  {audioFailed === audio && (
+                    <span className="text-sm text-red-600">
+                      ⚠️ The audio file couldn't be loaded from S3. If every voice fails, check that the bucket
+                      policy makes question-audios/* publicly readable.
+                    </span>
+                  )}
+                  {audio !== item?.audio && (
+                    <span className="text-sm font-normal text-gray-500">
+                      New voice: Save to keep it{item?.audio ? ' (it replaces the saved one)' : ''}, or Generate voice again for another take.
+                      Remove audio is only for when you want the question to have no audio at all.
+                    </span>
+                  )}
+                </>
+              )}
+              {!audio && item?.audio && (
+                <span className="text-sm font-normal text-gray-500">The saved audio will be removed when you Save.</span>
+              )}
+            </div>
 
             <label className={labelClass}>
               Question text
@@ -402,7 +457,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
         )}
 
         <div className="flex justify-end gap-2">
-          <button onClick={save} disabled={saving || uploading > 0} className={`${buttonClass} bg-green-600 text-white`}>
+          <button onClick={save} disabled={saving || uploading > 0 || generating} className={`${buttonClass} bg-green-600 text-white`}>
             {saving ? 'Saving…' : 'Save'}
           </button>
           <button onClick={onClose} disabled={saving} className={buttonClass}>
@@ -422,34 +477,6 @@ function explanationHtml(editor: EditorRef | null): string | null {
   const html = editor?.get_content() ?? '';
   const hasText = (editor?.get_text() ?? '').trim() !== '';
   return hasText || html.includes('<img') ? html : null;
-}
-
-// The image URLs in media text, in order: each ![...](<url>).
-// The images in the media text, ![<alt>](<url>), in order. The alt slot holds
-// an image's display size in the student app, e.g. ![50%](url): that share of
-// the question's width. An image without one (![](url)) gets the default size.
-const MEDIA_IMAGE = /!\[([^\]]*)\]\((\S+?)\)/g;
-
-// The sizes offered in each image's size picker, in % of the question's width.
-const IMAGE_SIZES = [25, 50, 75, 100];
-
-function mediaImages(media: string): { url: string; size: number | null }[] {
-  return Array.from(media.matchAll(MEDIA_IMAGE), (m) => ({ url: m[2], size: imageSize(m[1]) }));
-}
-
-// "50%" → 50; null for anything else (no size, or out of 1–100).
-function imageSize(alt: string): number | null {
-  const match = /^\s*(\d{1,3})\s*%\s*$/.exec(alt);
-  const size = match ? Number(match[1]) : NaN;
-  return size >= 1 && size <= 100 ? size : null;
-}
-
-// The media text with its `index`-th image's size set (null: default size).
-function withImageSize(media: string, index: number, size: number | null): string {
-  let n = 0;
-  return media.replace(MEDIA_IMAGE, (whole, _alt: string, url: string) =>
-    n++ === index ? `![${size === null ? '' : `${size}%`}](${url})` : whole,
-  );
 }
 
 // The choices string's options, as the student app splits them ("am/is/are").

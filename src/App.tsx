@@ -5,10 +5,11 @@ import { AuthScreen } from './AuthScreen'
 import ListLevels from './ListLevels'
 import ListUsers from './ListUsers'
 import DialogsManager from './DialogsManager'
+import TtsManager from './TtsManager'
 
 import './App.css'
 
-type Tab = 'levels' | 'users' | 'dialogs'
+type Tab = 'levels' | 'users' | 'dialogs' | 'tts'
 
 // Gate the app: an unauthenticated user only ever sees the login/register
 // screen, so no dialog data is fetched until they are signed in.
@@ -28,6 +29,7 @@ function AppContent() {
     { id: 'levels', label: 'Levels' },
     { id: 'users', label: 'Users' },
     { id: 'dialogs', label: 'Dialogs Manager' },
+    { id: 'tts', label: 'TTS Manager' },
   ]
 
   return (
@@ -70,6 +72,8 @@ function AppContent() {
         <ListUsers />
       ) : tab === 'dialogs' ? (
         <DialogsManager />
+      ) : tab === 'tts' ? (
+        <TtsManager />
       ) : (
         <ListLevels />
       )}
