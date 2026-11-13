@@ -1,4 +1,4 @@
-import React, { useEffect, useImperativeHandle, useState } from 'react';
+import React, { createContext, useContext, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 
 import {
   type ColumnDef,
@@ -62,11 +62,26 @@ interface GenericTableProps<T extends genericItemType> {
   ref?: React.Ref<GenericSortableTableHandleProps<T>>;
 }
 
-// Drag handle for a row; put it in a column cell: cell: ({ row }) => <RowDragHandleCell rowId={row.id} />
-export const RowDragHandleCell = ({ rowId }: { rowId: string }) => {
-  const { attributes, listeners } = useSortable({ id: rowId });
+// The drag props of the row a handle sits in, from that row's useSortable.
+type SortableHandleProps = Pick<ReturnType<typeof useSortable>, 'attributes' | 'listeners' | 'setActivatorNodeRef'>;
+const SortableRowContext = createContext<SortableHandleProps | null>(null);
+
+// Drag handle for a row; put it in a column cell: cell: () => <RowDragHandleCell />
+// It takes its row's drag listeners from context rather than calling
+// useSortable itself: a second useSortable with the row's id registers with
+// dnd-kit too, and when the handle remounts without its row (a new `columns`
+// array remounts every cell, e.g. once the Voice column's labels load) that
+// registration replaces the row's, leaving dnd-kit no element to measure, so
+// a dropped row snaps back.
+export const RowDragHandleCell = () => {
+  const sortable = useContext(SortableRowContext);
   return (
-    <button {...attributes} {...listeners} className="cursor-grab">
+    <button
+      ref={sortable?.setActivatorNodeRef}
+      {...sortable?.attributes}
+      {...sortable?.listeners}
+      className="cursor-grab"
+    >
       🟰
     </button>
   );
@@ -77,9 +92,13 @@ interface DraggableRowProps<T extends { itemId: string }> {
 }
 
 const DraggableRow = <T extends { itemId: string }>({ row }: DraggableRowProps<T>) => {
-  const { transform, transition, setNodeRef, isDragging } = useSortable({
+  const { attributes, listeners, setActivatorNodeRef, transform, transition, setNodeRef, isDragging } = useSortable({
     id: row.original.itemId,
   });
+  const handleProps = useMemo(
+    () => ({ attributes, listeners, setActivatorNodeRef }),
+    [attributes, listeners, setActivatorNodeRef],
+  );
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform), // Let dnd-kit handle the transform
@@ -90,13 +109,15 @@ const DraggableRow = <T extends { itemId: string }>({ row }: DraggableRowProps<T
   };
 
   return (
-    <tr ref={setNodeRef} style={style}>
-      {row.getVisibleCells().map((cell) => (
-        <td key={cell.id} className={cellClass}>
-          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-        </td>
-      ))}
-    </tr>
+    <SortableRowContext.Provider value={handleProps}>
+      <tr ref={setNodeRef} style={style}>
+        {row.getVisibleCells().map((cell) => (
+          <td key={cell.id} className={cellClass}>
+            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+          </td>
+        ))}
+      </tr>
+    </SortableRowContext.Provider>
   );
 };
 

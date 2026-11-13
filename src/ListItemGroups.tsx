@@ -170,7 +170,7 @@ export default function ListItemGroups({ unit, onBack }: Props) {
       {
         id: 'drag-handle',
         header: '',
-        cell: ({ row }) => <RowDragHandleCell rowId={row.id} />,
+        cell: () => <RowDragHandleCell />,
         size: 60,
       },
       {

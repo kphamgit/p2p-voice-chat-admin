@@ -61,6 +61,8 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   const [showExplanationWhenCorrect, setShowExplanationWhenCorrect] = useState(
     item?.showExplanationWhenCorrect ?? false,
   );
+  // Only applies to format 8 (Words Select).
+  const [checkOrder, setCheckOrder] = useState(item?.checkOrder ?? false);
   const [uploading, setUploading] = useState(0); // images being uploaded right now
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +90,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   // Words Scramble (6) and Words Select (8) questions are written with
   // slashes between the words.
   const isSlashSeparated = [6, 8].includes(Number(format));
+  const isWordsSelect = Number(format) === 8;
 
   // Speak the audio text with the chosen voice and speed. The server stores
   // the MP3 in a pending folder and returns its URL to play here; saving the
@@ -170,6 +173,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
             answerKey: keyedChoice ? `choice${keyedChoice.number}` : answerKey.trim() || null,
             // Hidden fields are left out, so an existing value survives a format switch.
             ...(showChoices && { choices: choicesValue.trim() || null }),
+            ...(isWordsSelect && { checkOrder }),
             // Format is only set on create; edits never change it.
             ...(!isEdit && { format: formatNumber }),
           }),
@@ -352,18 +356,31 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               {isSlashSeparated && (
                 <span className="text-sm font-normal text-gray-500">Separate words with slashes (/)</span>
               )}
-              <input
-                value={questionText}
-                onChange={(e) => setQuestionText(e.target.value)}
-                placeholder={
-                  isButtonSelect
-                    ? 'Plain text, no brackets, e.g. Which word is a verb?'
-                    : isSlashSeparated
-                      ? 'e.g. I/am/a/student/.'
-                      : 'e.g. I [am] a student.'
-                }
-                className={inputClass}
-              />
+              <div className="flex gap-2">
+                <input
+                  value={questionText}
+                  onChange={(e) => setQuestionText(e.target.value)}
+                  placeholder={
+                    isButtonSelect
+                      ? 'Plain text, no brackets, e.g. Which word is a verb?'
+                      : isSlashSeparated
+                        ? 'e.g. I/am/a/student/.'
+                        : 'e.g. I [am] a student.'
+                  }
+                  className={`${inputClass} flex-1`}
+                />
+                {/* Words Scramble (6) and Words Select (8). */}
+                {isSlashSeparated && (
+                  <button
+                    type="button"
+                    onClick={() => setQuestionText(insertSlashes(questionText))}
+                    disabled={!questionText.trim()}
+                    className="shrink-0 rounded border border-gray-300 px-3 py-2 text-sm font-normal hover:opacity-90 disabled:opacity-50"
+                  >
+                    Insert slashes
+                  </button>
+                )}
+              </div>
             </label>
 
             <label className={labelClass}>
@@ -380,6 +397,15 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
                 </span>
               )}
             </label>
+
+            {/* Words Select (8) only. */}
+            {isWordsSelect && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={checkOrder} onChange={(e) => setCheckOrder(e.target.checked)} />
+                Check order
+                <span className="text-sm font-normal text-gray-500">(the selected words must match the answer key's order)</span>
+              </label>
+            )}
 
             {isButtonSelect && (
               // A div, not a <label>: it holds several inputs and buttons.
@@ -500,6 +526,21 @@ function choiceForKey(answerKey: string, choices: string): { number: number; wor
 function keyedChoiceNumber(answerKey: string): number | null {
   const match = /^choice\s*(\d+)$/i.exec(answerKey.trim());
   return match ? Number(match[1]) : null;
+}
+
+// "I am a student." → "I/am/a/student/." for a Words Scramble (6) or Words
+// Select (8) question: one
+// slash between words, and trailing punctuation (. , ! ? ; :) split off as its
+// own piece. Existing slashes count as separators, so clicking twice is harmless.
+function insertSlashes(text: string): string {
+  return text
+    .split(/[\s/]+/)
+    .flatMap((word) => {
+      const m = /^(.*?)([.,!?;:]+)$/.exec(word);
+      return m ? [m[1], m[2]] : [word];
+    })
+    .filter(Boolean)
+    .join('/');
 }
 
 // "Cloze (1)", or just the number for a format with no name.

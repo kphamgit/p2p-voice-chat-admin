@@ -138,7 +138,7 @@ export default function ListItems({ itemGroup, onBack }: Props) {
     const dragHandle: ColumnDef<ItemRow> = {
       id: 'drag-handle',
       header: '',
-      cell: ({ row }) => <RowDragHandleCell rowId={row.id} />,
+      cell: () => <RowDragHandleCell />,
       size: 60,
     };
     const itemNumber: ColumnDef<ItemRow> = { accessorKey: 'item_number', header: 'Item Number' };
@@ -175,7 +175,19 @@ export default function ListItems({ itemGroup, onBack }: Props) {
       },
       // Format only means something for questions, so it's shown only in "question" groups.
       ...(itemGroup.itemType === 'question'
-        ? [{ id: 'format', header: 'Format', cell: ({ row }) => q(row.original)?.format } as ColumnDef<ItemRow>]
+        ? [
+            {
+              id: 'format',
+              header: 'Format',
+              // "6 - Words Scramble"; just the number for a format with no name.
+              cell: ({ row }) => {
+                const format = q(row.original)?.format;
+                if (format == null) return null;
+                const label = QUESTION_FORMATS.find((f) => f.value === format)?.label;
+                return <span className="whitespace-nowrap">{label ? `${format} - ${label}` : format}</span>;
+              },
+            } as ColumnDef<ItemRow>,
+          ]
         : []),
       itemId,
     ];

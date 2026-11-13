@@ -166,7 +166,7 @@ export default function ListUnits({ level, onBack }: Props) {
       {
         id: 'drag-handle',
         header: '',
-        cell: ({ row }) => <RowDragHandleCell rowId={row.id} />,
+        cell: () => <RowDragHandleCell />,
         size: 60,
       },
       { accessorKey: 'item_number', header: 'Unit Number' },

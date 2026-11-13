@@ -6,10 +6,11 @@ import ListLevels from './ListLevels'
 import ListUsers from './ListUsers'
 import DialogsManager from './DialogsManager'
 import TtsManager from './TtsManager'
+import DictionaryManager from './DictionaryManager'
 
 import './App.css'
 
-type Tab = 'levels' | 'users' | 'dialogs' | 'tts'
+type Tab = 'levels' | 'users' | 'dialogs' | 'tts' | 'dictionary'
 
 // Gate the app: an unauthenticated user only ever sees the login/register
 // screen, so no dialog data is fetched until they are signed in.
@@ -30,6 +31,7 @@ function AppContent() {
     { id: 'users', label: 'Users' },
     { id: 'dialogs', label: 'Dialogs Manager' },
     { id: 'tts', label: 'TTS Manager' },
+    { id: 'dictionary', label: 'Manage Viet Dictionary' },
   ]
 
   return (
@@ -74,6 +76,8 @@ function AppContent() {
         <DialogsManager />
       ) : tab === 'tts' ? (
         <TtsManager />
+      ) : tab === 'dictionary' ? (
+        <DictionaryManager />
       ) : (
         <ListLevels />
       )}

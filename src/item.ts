@@ -33,6 +33,7 @@ export interface QuestionItem {
   voiceName: string | null; // id of the voice that speaks it (mostly ElevenLabs)
   explanation: string | null;
   showExplanationWhenCorrect: boolean; // explanation also after a correct answer
+  checkOrder: boolean; // only applies to format 8 (Words Select)
   itemGroupId: number;
 }
 
