@@ -14,6 +14,7 @@ export const QUESTION_FORMATS = [
   { value: 2, label: 'Button Cloze' },
   { value: 3, label: 'Button Select' },
   { value: 6, label: 'Words Scramble' },
+  { value: 7, label: 'Voice Answer' },
   { value: 8, label: 'Words Select' },
 ] as const;
 
@@ -37,6 +38,7 @@ export interface QuestionItem {
   explanation: string | null;
   showExplanationWhenCorrect: boolean; // explanation also after a correct answer
   checkOrder: boolean; // only applies to format 8 (Words Select)
+  halfHandsFree: boolean; // only applies to format 7 (Voice Answer): the mic starts by itself after the question's audio
   itemGroupId: number;
 }
 

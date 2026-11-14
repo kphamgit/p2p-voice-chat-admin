@@ -17,8 +17,9 @@ export interface VoiceValue {
   // cleared with the audio. Picking another voice in the dropdown doesn't
   // change it until that voice is generated.
   voiceName: string | null;
-  // Button Select (format 3) only: the voice says the question text, so the
-  // text field follows it instead of being typed in.
+  // When "same as question text" is offered (Button Select, Voice Answer) and
+  // checked: the voice says the question text, so the text field follows it
+  // instead of being typed in.
   sameAsQuestion: boolean;
 }
 
@@ -31,7 +32,7 @@ interface Props {
   savedAudio: string | null; // the item's saved URL, null for a new item or none saved
   isEdit: boolean; // editing a saved item (shows a note that editing the text doesn't redo the voice)
   initialVoice?: string | null; // the voice the dropdown starts on (the one it was saved with)
-  // Set (a Button Select question) to offer "same as question text"; the
+  // Set (for formats that offer it) to offer "same as question text"; the
   // form saves this as the text while that's checked.
   questionText?: string;
   token: string | null;
