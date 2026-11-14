@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from './auth-context';
 import { apiFetch } from './api';
+import { ReviewLogModal } from './ReviewLogModal';
 
 // A user as returned by GET /users (the backend never sends the password hash).
 interface User {
@@ -14,6 +15,7 @@ const ROLES = ['student', 'admin'];
 
 // Table of every user. Each row's Edit button opens a form below the table to
 // change the username and role (PUT /users/:id, admin-only on the backend).
+// A student's Review Log button shows their vocabulary-review answers.
 export default function ListUsers() {
   const { token, user: me } = useAuth();
   const [users, setUsers] = useState<User[] | null>(null);
@@ -22,6 +24,8 @@ export default function ListUsers() {
   // Edit form; null when no row is being edited
   const [editing, setEditing] = useState<User | null>(null);
   const [saving, setSaving] = useState(false);
+  // The student whose review log is open, if any.
+  const [logFor, setLogFor] = useState<User | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +87,7 @@ export default function ListUsers() {
               <th className={`${cellClass} text-left`}>Role</th>
               <th className={`${cellClass} text-left`}>Created</th>
               <th className={`${cellClass} text-left`}>Edit</th>
+              <th className={`${cellClass} text-left`}>Review</th>
             </tr>
           </thead>
           <tbody>
@@ -99,6 +104,16 @@ export default function ListUsers() {
                   >
                     Edit
                   </button>
+                </td>
+                <td className={cellClass}>
+                  {u.role === 'student' && (
+                    <button
+                      onClick={() => setLogFor(u)}
+                      className="my-1 rounded bg-gray-600 px-2 font-bold text-white hover:opacity-90"
+                    >
+                      Review Log
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -137,6 +152,8 @@ export default function ListUsers() {
           </button>
         </form>
       )}
+
+      {logFor && <ReviewLogModal userId={logFor.id} username={logFor.name} onClose={() => setLogFor(null)} />}
     </div>
   );
 }

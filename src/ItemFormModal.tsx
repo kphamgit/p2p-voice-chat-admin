@@ -4,8 +4,7 @@ import { useAuth } from './auth-context';
 import { apiFetch } from './api';
 import { MediaField } from './MediaField';
 import { QUESTION_FORMATS, type QuestionItem } from './item';
-import { TtsPickers } from './TtsControls';
-import { useTtsChoice } from './useTts';
+import { VoiceField, type VoiceValue } from './VoiceField';
 
 // Modal for authoring an item in an item group. Without an `item` it creates one
 // (POST /question-items, from the items page's "Add Item" button in a "question"
@@ -44,18 +43,17 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   // String for the same reason as itemNumber. New items start at defaultFormat.
   const [format, setFormat] = useState(String(item?.format ?? defaultFormat));
   const [media, setMedia] = useState(item?.media ?? '');
-  // The question's audio: the saved MP3's URL, or a voice just generated
-  // below (which only stays if the item is saved with it).
-  const [audio, setAudio] = useState<string | null>(item?.audio ?? null);
-  const [audioText, setAudioText] = useState(item?.audioText ?? '');
-  // Starts on the voice the question was saved with.
-  const tts = useTtsChoice(token, item?.voiceName);
-  // The voice that spoke `audio` (its id): set when a voice is generated,
-  // cleared with the audio. Picking another voice in the dropdown doesn't
-  // change it until that voice is generated.
-  const [voiceName, setVoiceName] = useState<string | null>(item?.audio ? (item.voiceName ?? null) : null);
-  const [generating, setGenerating] = useState(false);
-  const [audioFailed, setAudioFailed] = useState<string | null>(null); // the audio URL that wouldn't load
+  // The question's audio and its trailing audio: generated voices (see VoiceField).
+  // A Button Select's "same as question text" boxes start checked when the
+  // saved text is the question text.
+  const [mainVoice, setMainVoice] = useState<VoiceValue>(() =>
+    savedVoice(item?.audio, item?.audioText, item?.voiceName, item),
+  );
+  const [trailingVoice, setTrailingVoice] = useState<VoiceValue>(() =>
+    savedVoice(item?.trailingAudio, item?.trailingAudioText, item?.trailingVoiceName, item),
+  );
+  const [generating, setGenerating] = useState(0); // voices being generated right now
+  const onGeneratingChange = (g: boolean) => setGenerating((n) => n + (g ? 1 : -1));
   // Explanation is rich text (HTML) from the Tiptap editor, read via its ref on save.
   const explanationEditor = useRef<EditorRef>(null);
   const [showExplanationWhenCorrect, setShowExplanationWhenCorrect] = useState(
@@ -91,27 +89,9 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   // slashes between the words.
   const isSlashSeparated = [6, 8].includes(Number(format));
   const isWordsSelect = Number(format) === 8;
-
-  // Speak the audio text with the chosen voice and speed. The server stores
-  // the MP3 in a pending folder and returns its URL to play here; saving the
-  // item keeps it (and deletes the voice it replaces), closing without saving
-  // leaves the saved audio as it was. Generate again for another take.
-  const generateVoice = async () => {
-    setGenerating(true);
-    setError(null);
-    try {
-      const { url } = await apiFetch<{ url: string }>('/question-items/audio', token, {
-        method: 'POST',
-        body: { text: audioText.trim(), ...tts.request },
-      });
-      setAudio(url);
-      setVoiceName(tts.request.voice);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Generating the voice failed.');
-    } finally {
-      setGenerating(false);
-    }
-  };
+  // What a voice says: the question text while a Button Select's "same as
+  // question text" is checked, otherwise its own text.
+  const voiceText = (v: VoiceValue) => (isButtonSelect && v.sameAsQuestion ? questionText : v.text).trim() || null;
 
   const save = async () => {
     const number = Number(itemNumber);
@@ -165,9 +145,12 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
             questionText: questionText.trim() || null,
             questionPrompt: questionPrompt.trim() || null,
             media: media.trim() || null,
-            audio,
-            audioText: audioText.trim() || null,
-            voiceName: audio ? voiceName : null,
+            audio: mainVoice.audio,
+            audioText: voiceText(mainVoice),
+            voiceName: mainVoice.audio ? mainVoice.voiceName : null,
+            trailingAudio: trailingVoice.audio,
+            trailingAudioText: voiceText(trailingVoice),
+            trailingVoiceName: trailingVoice.audio ? trailingVoice.voiceName : null,
             explanation: explanationHtml(explanationEditor.current),
             showExplanationWhenCorrect,
             answerKey: keyedChoice ? `choice${keyedChoice.number}` : answerKey.trim() || null,
@@ -241,17 +224,6 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               </label>
             )}
 
-            <label className={labelClass}>
-              Question prompt (optional)
-              <textarea
-                value={questionPrompt}
-                onChange={(e) => setQuestionPrompt(e.target.value)}
-                placeholder="e.g. Choose the correct answer."
-                rows={3}
-                className={`${inputClass} resize-y font-[inherit] leading-normal`}
-              />
-            </label>
-
             <MediaField
               media={media}
               setMedia={setMedia}
@@ -264,92 +236,34 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               inputClass={inputClass}
             />
 
-            {/* A div, not a <label>: it holds several inputs and buttons. */}
-            <div className={`${labelClass} rounded border border-gray-300 p-3`}>
-              Audio (optional)
-              <label className={labelClass}>
-                <span className="text-sm font-normal text-gray-500">Audio text: what the voice says</span>
-                <input
-                  value={audioText}
-                  onChange={(e) => setAudioText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && audioText.trim() && tts.voice && !generating) generateVoice();
-                  }}
-                  placeholder="e.g. I am a student."
-                  className={inputClass}
-                />
-              </label>
-              {/* Read-only: the voice of the generated audio, saved as its id. */}
-              <div className={labelClass}>
-                <span className="text-sm font-normal text-gray-500">Voice name (the voice of the audio, set when you generate)</span>
-                <div className="flex flex-wrap items-baseline gap-x-2 rounded border border-gray-200 bg-gray-50 p-2 text-[var(--text-h)]">
-                  {audio && voiceName ? (
-                    <>
-                      <code className="text-sm">{voiceName}</code>
-                      {tts.voiceLabel(voiceName) && (
-                        <span className="text-sm text-gray-500">{tts.voiceLabel(voiceName)}</span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-sm text-gray-500">{audio ? 'Not recorded' : 'No audio'}</span>
-                  )}
-                </div>
-              </div>
-              <TtsPickers
-                choice={tts}
-                labelClass={labelClass}
-                hintClass="text-sm font-normal text-gray-500"
-                inputClass={inputClass}
+            <VoiceField
+              title="Audio (optional)"
+              noun="audio"
+              placeholder="e.g. I am a student."
+              value={mainVoice}
+              setValue={setMainVoice}
+              savedAudio={item?.audio ?? null}
+              isEdit={isEdit}
+              initialVoice={item?.voiceName}
+              questionText={isButtonSelect ? questionText : undefined}
+              token={token}
+              setError={setError}
+              onGeneratingChange={onGeneratingChange}
+              labelClass={labelClass}
+              inputClass={inputClass}
+              buttonClass={buttonClass}
+            />
+
+            <label className={labelClass}>
+              Question prompt (optional)
+              <textarea
+                value={questionPrompt}
+                onChange={(e) => setQuestionPrompt(e.target.value)}
+                placeholder="e.g. Choose the correct answer."
+                rows={3}
+                className={`${inputClass} resize-y font-[inherit] leading-normal`}
               />
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={generateVoice}
-                  disabled={!audioText.trim() || !tts.voice || generating}
-                  className={buttonClass}
-                >
-                  {generating ? 'Generating…' : 'Generate voice'}
-                </button>
-                {audio && (
-                  <button type="button" onClick={() => {
-                      setAudio(null);
-                      setVoiceName(null);
-                    }}
-                    disabled={generating} className={buttonClass}>
-                    Remove audio
-                  </button>
-                )}
-              </div>
-              {audio && (
-                <>
-                  {/* crossOrigin for the same reason as the media images above. */}
-                  <audio
-                    key={audio}
-                    src={audio}
-                    controls
-                    autoPlay={audio !== item?.audio}
-                    crossOrigin="anonymous"
-                    onError={() => setAudioFailed(audio)}
-                    className="w-full"
-                  />
-                  {audioFailed === audio && (
-                    <span className="text-sm text-red-600">
-                      ⚠️ The audio file couldn't be loaded from S3. If every voice fails, check that the bucket
-                      policy makes question-audios/* publicly readable.
-                    </span>
-                  )}
-                  {audio !== item?.audio && (
-                    <span className="text-sm font-normal text-gray-500">
-                      New voice: Save to keep it{item?.audio ? ' (it replaces the saved one)' : ''}, or Generate voice again for another take.
-                      Remove audio is only for when you want the question to have no audio at all.
-                    </span>
-                  )}
-                </>
-              )}
-              {!audio && item?.audio && (
-                <span className="text-sm font-normal text-gray-500">The saved audio will be removed when you Save.</span>
-              )}
-            </div>
+            </label>
 
             <label className={labelClass}>
               Question text
@@ -473,6 +387,24 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               />
               Show the explanation even when the answer is correct
             </label>
+
+            <VoiceField
+              title="Trailing audio (optional)"
+              noun="trailing audio"
+              placeholder="e.g. I am a student."
+              value={trailingVoice}
+              setValue={setTrailingVoice}
+              savedAudio={item?.trailingAudio ?? null}
+              isEdit={isEdit}
+              initialVoice={item?.trailingVoiceName ?? item?.voiceName}
+              questionText={isButtonSelect ? questionText : undefined}
+              token={token}
+              setError={setError}
+              onGeneratingChange={onGeneratingChange}
+              labelClass={labelClass}
+              inputClass={inputClass}
+              buttonClass={buttonClass}
+            />
           </>
         )}
 
@@ -483,7 +415,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
         )}
 
         <div className="flex justify-end gap-2">
-          <button onClick={save} disabled={saving || uploading > 0 || generating} className={`${buttonClass} bg-green-600 text-white`}>
+          <button onClick={save} disabled={saving || uploading > 0 || generating > 0} className={`${buttonClass} bg-green-600 text-white`}>
             {saving ? 'Saving…' : 'Save'}
           </button>
           <button onClick={onClose} disabled={saving} className={buttonClass}>
@@ -496,6 +428,19 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
 }
 
 export default ItemFormModal;
+
+// The starting value of a VoiceField, from an item's saved audio fields
+// (undefined for a new item). "Same as question text" starts checked for a
+// saved Button Select whose voice text is its question text.
+function savedVoice(
+  audio: string | null | undefined,
+  text: string | null | undefined,
+  voiceName: string | null | undefined,
+  item: QuestionItem | undefined,
+): VoiceValue {
+  const sameAsQuestion = item?.format === 3 && !!text?.trim() && text.trim() === item.questionText?.trim();
+  return { audio: audio ?? null, text: text ?? '', voiceName: audio ? (voiceName ?? null) : null, sameAsQuestion };
+}
 
 // The explanation editor's HTML, or null when it's empty (Tiptap reports an
 // empty editor as "<p></p>", which shouldn't be saved as an explanation).

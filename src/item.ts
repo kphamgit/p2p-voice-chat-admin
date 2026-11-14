@@ -31,6 +31,9 @@ export interface QuestionItem {
   audio: string | null; // public S3 URL of the question's MP3 (generated speech)
   audioText: string | null; // the text the audio speaks
   voiceName: string | null; // id of the voice that speaks it (mostly ElevenLabs)
+  trailingAudio: string | null; // public S3 URL of a second MP3 (generated speech)
+  trailingAudioText: string | null; // the text the trailing audio speaks
+  trailingVoiceName: string | null; // id of the voice that speaks it
   explanation: string | null;
   showExplanationWhenCorrect: boolean; // explanation also after a correct answer
   checkOrder: boolean; // only applies to format 8 (Words Select)
