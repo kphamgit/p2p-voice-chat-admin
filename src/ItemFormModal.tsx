@@ -3,7 +3,10 @@ import SimpleEditor, { type EditorRef } from './components/tiptap_editor/SimpleE
 import { useAuth } from './auth-context';
 import { apiFetch } from './api';
 import { MediaField } from './MediaField';
-import { QUESTION_FORMATS, type QuestionItem } from './item';
+import { AudioField } from './AudioField';
+import { plainText, QUESTION_FORMATS, type Audio, type QuestionItem } from './item';
+import { ShadowingScoringOptions } from './ShadowingScoringOptions';
+import { scoringFormFrom, scoringOptionsFrom, stressWordsOf } from './scoring';
 import { VoiceField, type VoiceValue } from './VoiceField';
 
 // Modal for authoring an item in an item group. Without an `item` it creates one
@@ -49,14 +52,14 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   // String for the same reason as itemNumber. New items start at defaultFormat.
   const [format, setFormat] = useState(String(item?.format ?? defaultFormat));
   const [media, setMedia] = useState(item?.media ?? '');
-  // The question's audio and its trailing audio: generated voices (see VoiceField).
-  // Their "same as question text" boxes (see SAME_AS_QUESTION_FORMATS) start
-  // checked when the saved text is the question text.
+  // The question's audio and its trailing audio (see AudioField). Their "same
+  // as question text" boxes (see SAME_AS_QUESTION_FORMATS) start checked when
+  // the saved audio says the question text.
   const [mainVoice, setMainVoice] = useState<VoiceValue>(() =>
-    savedVoice(item?.audio, item?.audioText, item?.voiceName, item, SAME_AS_QUESTION_FORMATS.audio),
+    savedVoice(item?.audio ?? null, item, SAME_AS_QUESTION_FORMATS.audio),
   );
   const [trailingVoice, setTrailingVoice] = useState<VoiceValue>(() =>
-    savedVoice(item?.trailingAudio, item?.trailingAudioText, item?.trailingVoiceName, item, SAME_AS_QUESTION_FORMATS.trailing),
+    savedVoice(item?.trailingAudio ?? null, item, SAME_AS_QUESTION_FORMATS.trailing),
   );
   const [generating, setGenerating] = useState(0); // voices being generated right now
   const onGeneratingChange = (g: boolean) => setGenerating((n) => n + (g ? 1 : -1));
@@ -69,6 +72,11 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   const [checkOrder, setCheckOrder] = useState(item?.checkOrder ?? false);
   // Only applies to format 7 (Voice Answer).
   const [halfHandsFree, setHalfHandsFree] = useState(item?.halfHandsFree ?? false);
+  // Only applies to format 9 (Shadowing).
+  const [hideText, setHideText] = useState(item?.hideText ?? false);
+  // Only applies to format 9 (Shadowing): its Scoring options (the saved ones, or the defaults).
+  const [scoring, setScoring] = useState(() => scoringFormFrom(item?.scoringOptions));
+  const [stressWordsMissing, setStressWordsMissing] = useState(false); // outline the field after a Save without one
   const [uploading, setUploading] = useState(0); // images being uploaded right now
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,8 +92,8 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
 
   const isQuestion = itemType === 'question';
   // Which question fields apply depends on the format (see QUESTION_FORMATS).
-  // A Cloze (1), Words Scramble (6), Voice Answer (7) or Words Select (8) question has no choices.
-  const showChoices = ![1, 6, 7, 8].includes(Number(format));
+  // A Cloze (1), Words Scramble (6), Voice Answer (7), Words Select (8) or Shadowing (9) question has no choices.
+  const showChoices = ![1, 6, 7, 8, 9].includes(Number(format));
   // A Button Select question (format 3) is plain text: the student picks the
   // answer from the choices, so there are no [blanks] in the question.
   const isButtonSelect = Number(format) === 3;
@@ -98,7 +106,8 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   const isSlashSeparated = [6, 8].includes(Number(format));
   // A Words Scramble (6) has no answer key: its question text is the sentence
   // in the right order, which the student app shuffles and checks against.
-  const hasAnswerKey = Number(format) !== 6;
+  // Nor does a Shadowing (9): its question text is the sentence to repeat.
+  const hasAnswerKey = ![6, 9].includes(Number(format));
   // A Cloze (1) or Button Cloze (2) marks its blanks with their answers in
   // brackets, "I [am] a student.", so Get Answer can fill the key from them.
   const isCloze = [1, 2].includes(Number(format));
@@ -112,12 +121,63 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   const isVoiceAnswer = Number(format) === 7;
   // The answer key as saved: a Voice Answer's rows joined with slashes.
   const answerKeyValue = isVoiceAnswer ? answerRows.map((a) => a.trim()).join('/') : answerKey;
+  // A Shadowing (9) is a plain-text sentence the student repeats after its
+  // audio; the server scores the recording against it (Azure).
+  const isShadowing = Number(format) === 9;
   // Whether the Audio and Trailing audio sections offer "same as question text" for this format.
   const audioSameAsOffered = SAME_AS_QUESTION_FORMATS.audio.includes(Number(format));
   const trailingSameAsOffered = SAME_AS_QUESTION_FORMATS.trailing.includes(Number(format));
-  // What a voice says: the question text while its "same as question text"
-  // is offered and checked, otherwise its own text.
+  // The text a section's voice is generated from: the question text while its
+  // "same as question text" is offered and checked, otherwise its own text.
   const voiceText = (v: VoiceValue, offered: boolean) => (offered && v.sameAsQuestion ? questionText : v.text).trim() || null;
+
+  // The question's Audio section. A Shadowing's is required and always says
+  // the question text, so it sits after the question text.
+  const audioField = (
+    <AudioField
+      title={
+        isShadowing ? (
+          <>
+            Audio <span className="text-red-600">(required)</span>
+          </>
+        ) : (
+          'Audio (optional)'
+        )
+      }
+      hint={
+        isShadowing ? "The student repeats after this audio, so a Shadowing question can't be saved without it." : undefined
+      }
+      noun="audio"
+      value={mainVoice}
+      setValue={setMainVoice}
+      questionText={questionText}
+      mustSayQuestion={isShadowing}
+      setQuestionText={setQuestionText}
+      token={token}
+      inputClass={inputClass}
+      buttonClass={buttonClass}
+    >
+      <VoiceField
+        title={isShadowing ? 'Generate a voice from the question text' : 'Generate a voice'}
+        noun="audio"
+        placeholder="e.g. I am a student."
+        value={mainVoice}
+        setValue={setMainVoice}
+        savedAudioId={item?.audio?.id ?? null}
+        isEdit={isEdit}
+        initialVoice={item?.audio?.voice}
+        questionText={audioSameAsOffered || isShadowing ? questionText : undefined}
+        required={isShadowing}
+        textIsQuestion={isShadowing}
+        token={token}
+        setError={setError}
+        onGeneratingChange={onGeneratingChange}
+        labelClass={labelClass}
+        inputClass={inputClass}
+        buttonClass={buttonClass}
+      />
+    </AudioField>
+  );
 
   const save = async () => {
     const number = Number(itemNumber);
@@ -138,6 +198,26 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
       setError(bracketError);
       return;
     }
+    if (isQuestion && isShadowing && /[[\]/]/.test(questionText)) {
+      setError('A Shadowing sentence is plain text: no brackets or slashes.');
+      return;
+    }
+    // A Shadowing is repeated after its audio, so it can't be saved without one.
+    if (isQuestion && isShadowing && !stressWordsOf(scoring)) {
+      setStressWordsMissing(true);
+      setError('A Shadowing question needs at least one stress word (Scoring options).');
+      return;
+    }
+    if (isQuestion && isShadowing && !mainVoice.audio) {
+      setError('A Shadowing question needs audio: generate a voice, or pick one from the library.');
+      return;
+    }
+    if (isQuestion && isShadowing && mainVoice.audio && plainText(questionText) !== mainVoice.audio.text) {
+      setError(
+        `A Shadowing question's audio must say its question text, but the audio says “${mainVoice.audio.text}”. Generate the voice again, or pick another audio.`,
+      );
+      return;
+    }
     if (isQuestion && isButtonSelect && /[[\]]/.test(questionText)) {
       setError('A Button Select question has no brackets: write it as plain text.');
       return;
@@ -152,7 +232,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
         return;
       }
     }
-    // Every format but Words Scramble needs an answer key (formats added later included).
+    // Every format but Words Scramble and Shadowing needs an answer key (formats added later included).
     if (isQuestion && hasAnswerKey && !answerKeyValue.trim()) {
       setError(
         isButtonSelect
@@ -208,20 +288,17 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
             questionText: questionText.trim() || null,
             questionPrompt: questionPrompt.trim() || null,
             media: media.trim() || null,
-            audio: mainVoice.audio,
-            audioText: voiceText(mainVoice, audioSameAsOffered),
-            voiceName: mainVoice.audio ? mainVoice.voiceName : null,
-            trailingAudio: trailingVoice.audio,
-            trailingAudioText: voiceText(trailingVoice, trailingSameAsOffered),
-            trailingVoiceName: trailingVoice.audio ? trailingVoice.voiceName : null,
+            audioId: mainVoice.audio?.id ?? null,
+            trailingAudioId: trailingVoice.audio?.id ?? null,
             explanation: explanationHtml(explanationEditor.current),
             showExplanationWhenCorrect,
-            // A Words Scramble's is cleared, so an old key can't be checked instead of the question text.
+            // A Words Scramble's or Shadowing's is cleared, so an old key can't be checked instead of the question text.
             answerKey: !hasAnswerKey ? null : keyedChoice ? `choice${keyedChoice.number}` : answerKeyValue.trim() || null,
             // Hidden fields are left out, so an existing value survives a format switch.
             ...(showChoices && { choices: choicesValue.trim() || null }),
             ...(isWordsSelect && { checkOrder }),
             ...(isVoiceAnswer && { halfHandsFree }),
+            ...(isShadowing && { hideText, scoringOptions: scoringOptionsFrom(scoring) }),
             // Format is only set on create; edits never change it.
             ...(!isEdit && { format: formatNumber }),
           }),
@@ -301,23 +378,8 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               inputClass={inputClass}
             />
 
-            <VoiceField
-              title="Audio (optional)"
-              noun="audio"
-              placeholder="e.g. I am a student."
-              value={mainVoice}
-              setValue={setMainVoice}
-              savedAudio={item?.audio ?? null}
-              isEdit={isEdit}
-              initialVoice={item?.voiceName}
-              questionText={audioSameAsOffered ? questionText : undefined}
-              token={token}
-              setError={setError}
-              onGeneratingChange={onGeneratingChange}
-              labelClass={labelClass}
-              inputClass={inputClass}
-              buttonClass={buttonClass}
-            />
+            {/* A Shadowing's (9) audio comes after the question text instead: it's that sentence, spoken. */}
+            {!isShadowing && audioField}
 
             <label className={labelClass}>
               Question prompt (optional)
@@ -347,6 +409,8 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
                       ? 'Plain text, no brackets, e.g. Which word is a verb?'
                       : isVoiceAnswer
                         ? 'Plain text, e.g. What do you do?'
+                      : isShadowing
+                        ? 'The sentence to repeat, e.g. I am a student.'
                         : isSlashSeparated
                         ? 'e.g. I/am/a/student/.'
                         : 'e.g. I [am] a student.'
@@ -367,6 +431,8 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               </div>
               {bracketError && <span className="text-sm font-normal text-red-600">⚠️ {bracketError}</span>}
             </label>
+
+            {isShadowing && audioField}
 
             {/* Not for a Words Scramble (6): its question text is the answer. */}
             {/* Voice Answer (7): one row per accepted answer. A div, not a <label>: it holds several inputs and buttons. */}
@@ -460,6 +526,30 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               </label>
             )}
 
+            {/* Shadowing (9) only. */}
+            {isShadowing && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={hideText} onChange={(e) => setHideText(e.target.checked)} />
+                Hide the text
+                <span className="text-sm font-normal text-gray-500">
+                  (the student repeats from the audio alone; the sentence appears after their first try)
+                </span>
+              </label>
+            )}
+
+            {/* Shadowing (9) only: how the student's recording is scored. */}
+            {isShadowing && (
+              <ShadowingScoringOptions
+                value={scoring}
+                setValue={setScoring}
+                questionText={questionText}
+                showMissing={stressWordsMissing}
+                audio={mainVoice.audio}
+                token={token}
+                inputClass={inputClass}
+              />
+            )}
+
             {/* Words Select (8) only. */}
             {isWordsSelect && (
               <label className="flex items-center gap-2">
@@ -536,23 +626,35 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
               Show the explanation even when the answer is correct
             </label>
 
-            <VoiceField
+            <AudioField
               title="Trailing audio (optional)"
               noun="trailing audio"
-              placeholder="e.g. I am a student."
               value={trailingVoice}
               setValue={setTrailingVoice}
-              savedAudio={item?.trailingAudio ?? null}
-              isEdit={isEdit}
-              initialVoice={item?.trailingVoiceName ?? item?.voiceName}
-              questionText={trailingSameAsOffered ? questionText : undefined}
+              questionText={questionText}
+              setQuestionText={setQuestionText}
               token={token}
-              setError={setError}
-              onGeneratingChange={onGeneratingChange}
-              labelClass={labelClass}
               inputClass={inputClass}
               buttonClass={buttonClass}
-            />
+            >
+              <VoiceField
+                title="Generate a voice"
+                noun="trailing audio"
+                placeholder="e.g. I am a student."
+                value={trailingVoice}
+                setValue={setTrailingVoice}
+                savedAudioId={item?.trailingAudio?.id ?? null}
+                isEdit={isEdit}
+                initialVoice={item?.trailingAudio?.voice ?? item?.audio?.voice}
+                questionText={trailingSameAsOffered ? questionText : undefined}
+                token={token}
+                setError={setError}
+                onGeneratingChange={onGeneratingChange}
+                labelClass={labelClass}
+                inputClass={inputClass}
+                buttonClass={buttonClass}
+              />
+            </AudioField>
           </>
         )}
 
@@ -579,23 +681,20 @@ export default ItemFormModal;
 
 // The formats whose Audio / Trailing audio sections offer "same as question
 // text": Button Select (3) for both, and Voice Answer (7) for its audio (its
-// trailing audio is more likely the answer than the question).
+// trailing audio is more likely the answer than the question). A Shadowing's
+// (9) audio always says the question text, with no box.
 const SAME_AS_QUESTION_FORMATS: { audio: number[]; trailing: number[] } = { audio: [3, 7], trailing: [3] };
 
-// The starting value of a VoiceField, from an item's saved audio fields
-// (undefined for a new item). "Same as question text" starts checked when
-// `formats` offers it for the item's format and the saved voice text is its
-// question text.
-function savedVoice(
-  audio: string | null | undefined,
-  text: string | null | undefined,
-  voiceName: string | null | undefined,
-  item: QuestionItem | undefined,
-  formats: number[],
-): VoiceValue {
+// The starting value of an audio section, from an item's saved audio (null
+// for a new item or none). "Same as question text" starts checked when
+// `formats` offers it for the item's format and the audio says its question text.
+function savedVoice(audio: Audio | null, item: QuestionItem | undefined, formats: number[]): VoiceValue {
   const sameAsQuestion =
-    item !== undefined && formats.includes(item.format) && !!text?.trim() && text.trim() === item.questionText?.trim();
-  return { audio: audio ?? null, text: text ?? '', voiceName: audio ? (voiceName ?? null) : null, sameAsQuestion };
+    item !== undefined &&
+    audio !== null &&
+    formats.includes(item.format) &&
+    audio.text === plainText(item.questionText ?? '');
+  return { audio, text: audio?.text ?? '', sameAsQuestion };
 }
 
 // The explanation editor's HTML, or null when it's empty (Tiptap reports an

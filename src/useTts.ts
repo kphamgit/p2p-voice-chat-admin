@@ -95,7 +95,7 @@ export function useTtsChoice(token: string | null, initialVoice?: string | null)
       }
       return null;
     },
-    // What to send to /tts or /question-items/audio.
+    // What to send to /tts or /audios.
     request: { provider: providerId, voice, rate },
   };
 }

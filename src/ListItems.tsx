@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type ColumnDef } from '@tanstack/react-table';
 import { useAuth } from './auth-context';
 import { apiFetch } from './api';
+import { DeleteAudioItemModal } from './DeleteAudioItemModal';
 import GenericSortableTable, { RowDragHandleCell, type genericItemType } from './GenericSortableTable';
 import { ItemFormModal } from './ItemFormModal';
 import { QUESTION_FORMATS, type QuestionItem, type TextItem } from './item';
@@ -54,11 +55,15 @@ export default function ListItems({ itemGroup, onBack }: Props) {
   // Which item each form modal is open for: 'new', an existing item, or closed.
   const [questionFormFor, setQuestionFormFor] = useState<QuestionItem | 'new' | null>(null);
   const [textFormFor, setTextFormFor] = useState<TextItem | 'new' | null>(null);
+  // The question with audio whose Delete is waiting for an answer in DeleteAudioItemModal.
+  const [audioDeleteFor, setAudioDeleteFor] = useState<{ item: QuestionItem; resolve: (ok: boolean) => void } | null>(
+    null,
+  );
 
   // A new item defaults to one past the current highest number.
   const nextItemNumber = items.reduce((max, i) => Math.max(max, i.item_number), 0) + 1;
 
-  // Voice names for the Voice column: items store the voice id, e.g.
+  // Voice names for the Voice column: an audio stores the voice id, e.g.
   // "SAz9YHcvj6GT2YYXdXww", shown by its label marked with the provider,
   // e.g. "11L River - Relaxed, …" (GG for Google).
   const { providers } = useTtsChoice(token);
@@ -98,7 +103,14 @@ export default function ListItems({ itemGroup, onBack }: Props) {
   };
 
   const deleteItem = async (row: ItemRow) => {
-    if (!window.confirm(`Delete item ${row.item_number}?`)) {
+    // A question with audio asks in a modal that explains what happens to its
+    // audio files; anything else, with the plain confirm.
+    const hasAudio = row.kind === 'question' && (row.item.audio !== null || row.item.trailingAudio !== null);
+    const confirmed = hasAudio
+      ? await new Promise<boolean>((resolve) => setAudioDeleteFor({ item: row.item as QuestionItem, resolve }))
+      : window.confirm(`Delete item ${row.item_number}?`);
+    setAudioDeleteFor(null);
+    if (!confirmed) {
       throw new Error('cancelled'); // keeps the row in the table
     }
     try {
@@ -160,11 +172,11 @@ export default function ListItems({ itemGroup, onBack }: Props) {
       { id: 'answerKey', header: 'Answer Key', cell: ({ row }) => truncatedCell(q(row.original)?.answerKey ?? null) },
       { id: 'choices', header: 'Choices', cell: ({ row }) => truncatedCell(q(row.original)?.choices ?? null) },
       {
-        id: 'voiceName',
+        id: 'voice',
         header: 'Voice',
         // The label (id in the tooltip); the bare id if no provider lists it.
         cell: ({ row }) => {
-          const id = q(row.original)?.voiceName;
+          const id = q(row.original)?.audio?.voice;
           if (!id) return null;
           return (
             <span className="block max-w-48 truncate" title={id}>
@@ -265,6 +277,14 @@ export default function ListItems({ itemGroup, onBack }: Props) {
             getItems();
           }}
           onClose={() => setQuestionFormFor(null)}
+        />
+      )}
+
+      {audioDeleteFor && (
+        <DeleteAudioItemModal
+          item={audioDeleteFor.item}
+          onConfirm={() => audioDeleteFor.resolve(true)}
+          onCancel={() => audioDeleteFor.resolve(false)}
         />
       )}
 

@@ -16,10 +16,37 @@ export const QUESTION_FORMATS = [
   { value: 6, label: 'Words Scramble' },
   { value: 7, label: 'Voice Answer' },
   { value: 8, label: 'Words Select' },
+  { value: 9, label: 'Shadowing' },
 ] as const;
 
 // A question item as returned by the backend's /question-items and
 // /item-groups/:id/question-items endpoints.
+// A question audio (the server's Audio table): one generated MP3, public at
+// `url`, never changed. Questions point to one by id and may share it; the
+// library is the audios with inLibrary set.
+export interface Audio {
+  id: number;
+  url: string;
+  text: string; // what it says (words only)
+  ttsText: string; // the SSML / tagged text it was generated from, '' when that's just `text`
+  provider: string; // google | elevenlabs
+  voice: string; // the provider's voice id
+  speed: number | null; // the speaking rate asked for, null for the default
+  inLibrary: boolean;
+  keywords: string[];
+  createdAt: string;
+}
+
+// What an audio says, as the server keeps it (Audio.text): the words only,
+// any <tag> removed, spaces collapsed. A Shadowing's audio must say its
+// question text by this measure.
+export function plainText(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export interface QuestionItem {
   id: number;
   itemNumber: number;
@@ -29,18 +56,44 @@ export interface QuestionItem {
   choices: string | null;
   format: number;
   media: string | null; // text with inline images, ![](<url>)
-  audio: string | null; // public S3 URL of the question's MP3 (generated speech)
-  audioText: string | null; // the text the audio speaks
-  voiceName: string | null; // id of the voice that speaks it (mostly ElevenLabs)
-  trailingAudio: string | null; // public S3 URL of a second MP3 (generated speech)
-  trailingAudioText: string | null; // the text the trailing audio speaks
-  trailingVoiceName: string | null; // id of the voice that speaks it
+  audio: Audio | null; // the question's audio (required for format 9, saying the question text)
+  trailingAudio: Audio | null; // a second audio, played once the question is answered right
   explanation: string | null;
   showExplanationWhenCorrect: boolean; // explanation also after a correct answer
   checkOrder: boolean; // only applies to format 8 (Words Select)
   halfHandsFree: boolean; // only applies to format 7 (Voice Answer): the mic starts by itself after the question's audio
+  hideText: boolean; // only applies to format 9 (Shadowing): the sentence stays hidden until the student has tried it from the audio
+  scoringOptions: ScoringOptions | null; // only applies to format 9 (Shadowing): how the student's recording is scored
   itemGroupId: number;
 }
+
+// A Shadowing question's (format 9) scoring options, saved as the
+// phuyenenglish.com teacher panel's Scoring options send them to VoiceAnalyzer.
+export type StressSource = 'dictionary' | 'reference';
+
+export interface ScoringOptions {
+  targeted_words: string; // words that should link to the next one, e.g. "is" (is_a)
+  strict_connected_speech: boolean; // check linking (always on when targeted_words is set)
+  link_tolerance: number; // how much longer a pause between linked words may be than the reference's
+  stress_words: string; // "accept, apology": the words whose syllable stress is checked
+  stress_contrast_ratio: number; // share of the reference's stressed/unstressed contrast the student must reach
+  melody_min_similarity: number; // how closely each stress word's melody must follow the reference's
+  stress_source: StressSource; // who decides the right stressed syllable
+  fall_match_ratio: number; // paused check (sent as its default)
+  rise_match_ratio: number; // paused check (sent as its default)
+}
+
+// The teacher panel's defaults (phuyenenglish.com, shadowing/evaluation.ts).
+export const DEFAULT_FALL_MATCH_RATIO = 0.75;
+export const DEFAULT_RISE_MATCH_RATIO = 0.5;
+export const DEFAULT_LINK_TOLERANCE = 1;
+export const LINK_PAUSE_MARGIN_MS = 25; // the extra pause allowed at 1×
+export const DEFAULT_STRESS_CONTRAST_RATIO = 0.6;
+export const DEFAULT_MELODY_MIN_SIMILARITY = 0.35;
+export const DEFAULT_STRESS_SOURCE: StressSource = 'dictionary';
+// Paused checks, as in the teacher panel: their sliders are hidden and their defaults are saved.
+export const RISING_TONE_ENABLED = false;
+export const LEGACY_STRESS_ENABLED = false;
 
 // A text item as returned by the backend's /item-groups/:id/text-items endpoint.
 export interface TextItem {
