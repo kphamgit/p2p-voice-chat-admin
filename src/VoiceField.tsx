@@ -13,7 +13,7 @@ import { useTtsChoice } from './useTts';
 
 export interface VoiceValue {
   // The question's audio: the saved one, one just generated, or one picked
-  // from the library (only kept if the item is saved with it).
+  // from the library (only used once the item is saved with it).
   audio: Audio | null;
   text: string; // the text to generate from (the audio itself carries what it says)
   // When "same as question text" is offered (Button Select, Voice Answer) and
@@ -205,7 +205,7 @@ export function VoiceField({
           {audioFailed === audio.url && (
             <span className="text-sm text-red-600">
               ⚠️ The audio file couldn't be loaded from S3. If every voice fails, check that the bucket policy makes
-              the audio folder publicly readable: question-audios/*, or dev/question-audios/* for a development
+              the audio folder publicly readable: audios/library/*, or dev/audios/library/* for a development
               server (S3_PREFIX=dev/).
             </span>
           )}
@@ -231,7 +231,7 @@ export function VoiceField({
   );
 }
 
-// "dev/question-audios/<uuid>.mp3": an audio's place in the bucket, from its public URL.
+// "dev/audios/library/<uuid>.mp3": an audio's place in the bucket, from its public URL.
 function s3Path(url: string): string {
   return url.replace(/^https:\/\/[^/]+\//, '');
 }

@@ -50,9 +50,9 @@ export function DeleteAudioItemModal({ item, onConfirm, onCancel }: Props) {
                 <span className="font-medium">{name}:</span> “{audio!.text}”
               </div>
               <div className="text-gray-600">
-                {audio!.inLibrary
-                  ? 'In the library: kept, for other questions.'
-                  : 'Not in the library: deleted by the server’s cleanup, unless another question uses it.'}
+                {audio!.kept
+                  ? 'Kept for reuse: stays, for other questions.'
+                  : 'Not kept: deleted by the server’s cleanup, unless another question uses it.'}
               </div>
             </li>
           ))}
@@ -62,7 +62,7 @@ export function DeleteAudioItemModal({ item, onConfirm, onCancel }: Props) {
           <p className="m-0">What happens to an audio file:</p>
           <ul className="m-0 flex list-disc flex-col gap-1 pl-5">
             <li>
-              <strong>In the library:</strong> kept. It stays available for other questions.
+              <strong>Kept for reuse:</strong> stays. It remains available for other questions.
             </li>
             <li>
               <strong>Used by another question</strong> (e.g. a clone of this one): kept. The database won’t delete
@@ -75,7 +75,7 @@ export function DeleteAudioItemModal({ item, onConfirm, onCancel }: Props) {
             </li>
           </ul>
           <p className="m-0">
-            To keep an audio, cancel and add it to the library first (Edit → Save to library). The question’s pasted
+            To keep an audio, cancel and keep it first (Edit → Keep for reuse). The question’s pasted
             images are deleted right away.
           </p>
         </div>

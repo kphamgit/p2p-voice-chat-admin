@@ -9,11 +9,11 @@ import { toWav16kMono, wavFileName } from './wav';
 // One audio section of the question form (the Audio, or the Trailing audio),
 // for every format. "Use audio from":
 //   - Generate a voice: the voice generator (`children`, a VoiceField), plus
-//     "Save to library" to keep a generated voice for other questions
+//     "Keep for reuse" to keep a generated voice for other questions
 //     (PATCH /audios/:id).
-//   - From the library: search it (GET /audios?q=) and check an audio to use
-//     it. Questions share library audios (nothing is copied). Unchecking puts
-//     back the audio from before.
+//   - The library: search the kept audios (GET /audios?q=) and check one to use
+//     it. Questions share them (nothing is copied). Unchecking puts back the
+//     audio from before.
 // Both write the same `value`, so switching between them never drops the audio.
 
 interface Props {
@@ -63,7 +63,7 @@ export function AudioField({
     null,
   );
   const pickedId = picked && value.audio?.id === picked.id ? picked.id : undefined;
-  // Save to library: keywords for it.
+  // Keep for reuse: keywords for it.
   const [keywords, setKeywords] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -138,13 +138,13 @@ export function AudioField({
     try {
       const saved = await apiFetch<Audio>(`/audios/${audio.id}`, token, {
         method: 'PATCH',
-        body: { inLibrary: true, keywords },
+        body: { kept: true, keywords },
       });
       // Only if the section still holds that audio.
       setValue((v) => (v.audio?.id === saved.id ? { ...v, audio: saved } : v));
       setResults(null); // searched again next time, with this one in it
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Saving to the library failed.');
+      setSaveError(err instanceof Error ? err.message : 'Keeping the audio failed.');
     } finally {
       setSaving(false);
     }
@@ -171,8 +171,8 @@ export function AudioField({
       <div className={source === 'tts' ? 'flex flex-col gap-2' : 'hidden'}>
         {children}
         {value.audio &&
-          (value.audio.inLibrary ? (
-            <span className="text-sm font-normal text-gray-500">This {noun} is in the library.</span>
+          (value.audio.kept ? (
+            <span className="text-sm font-normal text-gray-500">This {noun} is kept for reuse.</span>
           ) : (
             <div className="flex flex-col gap-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -180,17 +180,17 @@ export function AudioField({
                   value={keywords}
                   onChange={(e) => setKeywords(e.target.value)}
                   placeholder="Keywords, e.g. apology, question intonation"
-                  aria-label="Keywords for the library"
+                  aria-label="Keywords for the kept audio"
                   className={`${inputClass} min-w-0 flex-1 text-sm`}
                 />
                 <button
                   type="button"
                   onClick={() => void saveToLibrary()}
                   disabled={saving}
-                  title="Keep this audio to find and reuse for other questions (From the library)"
+                  title="Keep this audio to find and reuse for other questions (Use audio from: The library)"
                   className={`${buttonClass} text-sm`}
                 >
-                  {saving ? 'Saving…' : 'Save to Library (database)'}
+                  {saving ? 'Saving…' : 'Keep for reuse (database)'}
                 </button>
               </div>
               <span className="text-sm font-normal text-gray-500">

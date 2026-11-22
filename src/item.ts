@@ -22,8 +22,8 @@ export const QUESTION_FORMATS = [
 // A question item as returned by the backend's /question-items and
 // /item-groups/:id/question-items endpoints.
 // A question audio (the server's Audio table): one generated MP3, public at
-// `url`, never changed. Questions point to one by id and may share it; the
-// library is the audios with inLibrary set.
+// `url` (in the audio library, audios/library/), never changed. Questions point
+// to one by id and may share it; the kept ones are searchable for reuse.
 export interface Audio {
   id: number;
   url: string;
@@ -32,7 +32,7 @@ export interface Audio {
   provider: string; // google | elevenlabs
   voice: string; // the provider's voice id
   speed: number | null; // the speaking rate asked for, null for the default
-  inLibrary: boolean;
+  kept: boolean; // chosen for reuse: searchable, never deleted automatically
   keywords: string[];
   createdAt: string;
 }
