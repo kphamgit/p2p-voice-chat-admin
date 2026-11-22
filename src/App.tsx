@@ -5,13 +5,12 @@ import { AuthScreen } from './AuthScreen'
 import ListLevels from './ListLevels'
 import ListUsers from './ListUsers'
 import DialogsManager from './DialogsManager'
-import TtsManager from './TtsManager'
 import DictionaryManager from './DictionaryManager'
-import SpeechAssessment from './SpeechAssessment'
+import ManageAudiosLibrary from './ManageAudiosLibrary'
 
 import './App.css'
 
-type Tab = 'levels' | 'users' | 'dialogs' | 'tts' | 'dictionary' | 'speech'
+type Tab = 'levels' | 'users' | 'dialogs' | 'dictionary' | 'library'
 
 // Gate the app: an unauthenticated user only ever sees the login/register
 // screen, so no dialog data is fetched until they are signed in.
@@ -31,9 +30,8 @@ function AppContent() {
     { id: 'levels', label: 'Levels' },
     { id: 'users', label: 'Users' },
     { id: 'dialogs', label: 'Dialogs Manager' },
-    { id: 'tts', label: 'TTS Manager' },
     { id: 'dictionary', label: 'Manage Viet Dictionary' },
-    { id: 'speech', label: 'Speech Assessment' },
+    { id: 'library', label: 'Manage Audios Library' },
   ]
 
   return (
@@ -76,12 +74,10 @@ function AppContent() {
         <ListUsers />
       ) : tab === 'dialogs' ? (
         <DialogsManager />
-      ) : tab === 'tts' ? (
-        <TtsManager />
       ) : tab === 'dictionary' ? (
         <DictionaryManager />
-      ) : tab === 'speech' ? (
-        <SpeechAssessment />
+      ) : tab === 'library' ? (
+        <ManageAudiosLibrary />
       ) : (
         <ListLevels />
       )}
