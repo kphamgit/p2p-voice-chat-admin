@@ -3,84 +3,125 @@ import { useAuth } from './auth-context';
 import { apiFetch } from './api';
 import type { Audio } from './item';
 
-// One file of the audio library folder in S3 (GET /audios/library), with the
-// Audio row that points to it, if any.
-interface LibraryFile {
+// An audio row as GET /audios/library returns it.
+type LibraryAudio = Audio & { questionCount: number; createdBy: string | null };
+
+type KeptFilter = 'all' | 'kept' | 'not_kept';
+
+// A library file that no audio row points to (GET /audios/library/check).
+interface StrayFile {
   key: string;
   url: string;
-  size: number | null; // null: the row's file is missing from S3
-  lastModified: string | null;
-  audio: (Audio & { questionCount: number }) | null; // null: no row points to this file
+  size: number;
+  lastModified: string;
 }
 
-interface Library {
-  prefix: string; // e.g. "audios/library/" ("dev/audios/library/" on a development server)
-  files: LibraryFile[];
+interface CheckResult {
+  strayFiles: StrayFile[];
+  missingFiles: LibraryAudio[];
 }
 
-// The "Manage Audios Library" tab: every file in the audio library folder, newest
-// first, with what it says, whether it's kept, how many questions use it, and
-// a Delete button. Deleting goes through the server (DELETE /audios/library),
-// which deletes the Audio row first and refuses while a question uses it, so
-// no question is left with a broken audio. Files with no row and rows whose
-// file is missing are flagged.
+// The "Manage Audios Library" tab. The library has two linked parts: a row in
+// the database (what it says, keywords, kept, which questions use it) and an
+// MP3 in S3. The rows are the source of truth, so the table lists the rows
+// (GET /audios/library). Delete removes the row, then its file
+// (DELETE /audios/:id), and is refused while a question uses the audio.
+// "Check S3" compares the folder with the rows (it lists the whole folder, so
+// it only runs when asked) and shows only the problems: files no row points
+// to, and rows whose file is gone.
 export default function ManageAudiosLibrary() {
   const { token } = useAuth();
-  const [library, setLibrary] = useState<Library | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState('');
-  const [deleting, setDeleting] = useState<string | null>(null); // the key being deleted
+  const [audios, setAudios] = useState<LibraryAudio[] | null>(null);
+  const [prefix, setPrefix] = useState('');
+  const [kept, setKept] = useState<KeptFilter>('all');
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState(''); // the query last searched
   const [reload, setReload] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null); // the row id or file key being deleted
+  const [check, setCheck] = useState<CheckResult | null>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await apiFetch<Library>('/audios/library', token);
+        const params = new URLSearchParams({ kept, q: search });
+        const data = await apiFetch<{ prefix: string; audios: LibraryAudio[] }>(`/audios/library?${params}`, token);
         if (!cancelled) {
-          setLibrary(data);
+          setAudios(data.audios);
+          setPrefix(data.prefix);
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load the library.');
+        if (!cancelled) setError(errorText(err, 'Failed to load the library.'));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [token, reload]);
+  }, [token, kept, search, reload]);
 
-  const remove = async (f: LibraryFile) => {
-    const what = f.audio ? `"${f.audio.text}"` : 'this file (no database row points to it)';
-    const note = f.audio?.kept ? '\n\nIt is kept for reuse.' : '';
-    if (!window.confirm(`Delete ${what} from the library?${note}\n\nThis can't be undone.`)) return;
-    setDeleting(f.key);
+  const runCheck = async () => {
+    setChecking(true);
     try {
-      await apiFetch(`/audios/library?key=${encodeURIComponent(f.key)}`, token, { method: 'DELETE' });
-      setLibrary((prev) => (prev ? { ...prev, files: prev.files.filter((x) => x.key !== f.key) } : prev));
+      setCheck(await apiFetch<CheckResult>('/audios/library/check', token));
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete the file.');
+      setError(errorText(err, 'Checking S3 failed.'));
     } finally {
-      setDeleting(null);
+      setChecking(false);
     }
   };
 
-  const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = (library?.files ?? []).filter((f) => {
-    const haystack = `${f.audio?.text ?? ''} ${f.audio?.keywords.join(' ') ?? ''} ${fileName(f.key)}`.toLowerCase();
-    return words.every((w) => haystack.includes(w));
-  });
-  const files = library?.files ?? [];
-  const noRow = files.filter((f) => !f.audio).length;
-  const missing = files.filter((f) => f.size === null).length;
+  const deleteAudio = async (a: LibraryAudio) => {
+    const note = a.kept ? '\n\nIt is kept for reuse.' : '';
+    if (!window.confirm(`Delete audio #${a.id} "${a.text}": its database row and its S3 file?${note}\n\nThis can't be undone.`)) return;
+    setBusy(String(a.id));
+    try {
+      await apiFetch(`/audios/${a.id}`, token, { method: 'DELETE' });
+      setAudios((prev) => prev?.filter((x) => x.id !== a.id) ?? null);
+      setCheck((prev) => prev && { ...prev, missingFiles: prev.missingFiles.filter((x) => x.id !== a.id) });
+      setError(null);
+    } catch (err) {
+      setError(errorText(err, 'Failed to delete the audio.'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteStray = async (f: StrayFile) => {
+    if (!window.confirm(`Delete ${fileName(f.key)} from S3? No database row points to it.\n\nThis can't be undone.`)) return;
+    setBusy(f.key);
+    try {
+      await apiFetch(`/audios/library/stray?key=${encodeURIComponent(f.key)}`, token, { method: 'DELETE' });
+      setCheck((prev) => prev && { ...prev, strayFiles: prev.strayFiles.filter((x) => x.key !== f.key) });
+      setError(null);
+    } catch (err) {
+      setError(errorText(err, 'Failed to delete the file.'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteButton = (onClick: () => void, id: string, used: number) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={used > 0 || busy !== null}
+      title={used > 0 ? 'A question uses this audio: take it off the question first.' : undefined}
+      className="my-1 rounded bg-red-600 px-2 font-bold text-white hover:opacity-90 disabled:opacity-40"
+    >
+      {busy === id ? 'Deleting…' : 'Delete'}
+    </button>
+  );
 
   return (
     <div className="p-5 text-left">
       <h2 className="text-2xl">Manage Audios Library</h2>
-      <p className="mt-1 text-sm text-gray-600">
-        Every audio file in <code>{library?.prefix ?? 'audios/library/'}</code>. Delete removes the file and its
-        database row; it's refused while a question uses the audio.
+      <p className="mt-1 text-sm text-[var(--text-h)]">
+        The audio in the database. Each audio's MP3 is in S3 at <code>{prefix || 'audios/library/'}&lt;random id&gt;.mp3</code>.
+        Delete removes the database row and the file; it's refused while a question uses the audio.
       </p>
 
       {error && (
@@ -89,30 +130,45 @@ export default function ManageAudiosLibrary() {
         </p>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <form
+        className="mt-3 flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setSearch(query.trim());
+          setReload((n) => n + 1);
+        }}
+      >
+        <label className="flex items-center gap-1">
+          Show
+          <select value={kept} onChange={(e) => setKept(e.target.value as KeptFilter)} className={inputClass}>
+            <option value="all">All audio</option>
+            <option value="kept">Kept</option>
+            <option value="not_kept">Not kept</option>
+          </select>
+        </label>
         <input
           type="search"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by text, keyword or file name"
-          className={`${inputClass} w-72`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Words or keywords"
+          className={`${inputClass} w-64`}
         />
-        <button type="button" onClick={() => setReload((n) => n + 1)} className={buttonClass}>
-          Refresh
+        <button type="submit" className={buttonClass}>
+          Search / Refresh
         </button>
-        {library && (
+        <button type="button" onClick={() => void runCheck()} disabled={checking} className={buttonClass}>
+          {checking ? 'Checking S3…' : 'Check S3'}
+        </button>
+        {audios && (
           <span className="text-sm text-gray-600">
-            {files.length} file{files.length === 1 ? '' : 's'}
-            {noRow > 0 && ` · ${noRow} without a database row`}
-            {missing > 0 && ` · ${missing} missing from S3`}
-            {words.length > 0 && ` · ${shown.length} shown`}
+            {audios.length} audio{audios.length === 1 ? '' : 's'}
+            {audios.length >= 200 && ' (the newest 200: search to narrow)'}
           </span>
         )}
-      </div>
+      </form>
 
-      {/* Closed by default; click the title to open it. */}
       <details className="mt-3 max-w-4xl rounded border border-[var(--border)] bg-gray-50 px-3 py-2 text-sm text-gray-700">
-        <summary className="cursor-pointer select-none font-semibold">What the Status and Used by columns mean</summary>
+        <summary className="cursor-pointer select-none font-semibold">What the columns and Check S3 mean</summary>
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
           <dt className="font-semibold">Kept</dt>
           <dd>
@@ -126,103 +182,151 @@ export default function ManageAudiosLibrary() {
             it (a voice generated in a form that was never saved, replaced by a new one, or whose question was
             deleted), the server deletes it on its own after a day. Deleting it here only does that sooner.
           </dd>
-          <dt className="font-semibold text-amber-700">No database row</dt>
-          <dd>
-            The file is in S3, but no audio in the database points to it, so no question can use it and the
-            automatic cleanup never touches it. It's usually left over from a failed save or delete, or from a
-            database that was reset. It's safe to delete.
-          </dd>
-          <dt className="font-semibold text-red-600">S3 File Missing</dt>
-          <dd>
-            The database has the audio, but its file isn't in S3 (it was probably deleted directly in S3). It can't
-            be played. A question using it shows its text with no sound: give that question a new audio. When no
-            question uses it, delete it here to remove the leftover database row.
-          </dd>
           <dt className="font-semibold">Used by</dt>
           <dd>
             How many questions play this audio (as their audio or their trailing audio). While it's more than 0,
             Delete is turned off: take the audio off those questions first.
           </dd>
+          <dt className="font-semibold">Check S3</dt>
+          <dd>
+            Compares the S3 folder with the database and lists only what doesn't match. It reads the whole folder, so
+            it runs only when you click it.
+          </dd>
+          <dt className="font-semibold text-amber-700">No database row</dt>
+          <dd>
+            A file in S3 that no audio in the database points to, so no question can use it. It's usually left over
+            from a failed save or delete, or from a database that was reset. It's safe to delete, and the server
+            deletes such files on its own once they're a day old.
+          </dd>
+          <dt className="font-semibold text-red-600">S3 File Missing</dt>
+          <dd>
+            The database has the audio, but its file isn't in S3 (it was probably deleted directly in S3). It can't
+            be played. A question using it has no sound: give that question a new audio. When no question uses it,
+            delete it to remove the leftover database row.
+          </dd>
         </dl>
       </details>
 
-      {library === null && !error && <p className="mt-3">Loading…</p>}
-      {library && shown.length === 0 && <p className="mt-3 text-gray-600">No files.</p>}
+      {check && (
+        <section className="mt-4 max-w-5xl rounded border border-[var(--border)] p-3">
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-semibold">Check S3</h3>
+            <button type="button" onClick={() => setCheck(null)} className="rounded bg-gray-600 px-2 py-0.5 text-sm font-bold text-white hover:opacity-90">
+              Close
+            </button>
+          </div>
+          {check.strayFiles.length === 0 && check.missingFiles.length === 0 && (
+            <p className="mt-1 text-green-700">✓ The S3 folder and the database match.</p>
+          )}
+          {check.strayFiles.length > 0 && (
+            <>
+              <h4 className="mt-2 font-semibold text-amber-700">
+                No database row ({check.strayFiles.length} file{check.strayFiles.length === 1 ? '' : 's'})
+              </h4>
+              <table className="mt-1 border-collapse text-sm">
+                <thead>
+                  <tr>
+                    <th className={`${cellClass} text-left`}>Audio</th>
+                    <th className={`${cellClass} text-left`}>File</th>
+                    <th className={`${cellClass} text-left`}>Size</th>
+                    <th className={`${cellClass} text-left`}>Stored</th>
+                    <th className={`${cellClass} text-left`}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {check.strayFiles.map((f) => (
+                    <tr key={f.key}>
+                      <td className={cellClass}>
+                        <audio src={f.url} controls preload="none" className="h-8 w-48" />
+                      </td>
+                      <td className={`${cellClass} font-mono text-xs`} title={f.key}>
+                        {fileName(f.key)}
+                      </td>
+                      <td className={cellClass}>{formatSize(f.size)}</td>
+                      <td className={cellClass}>{new Date(f.lastModified).toLocaleString()}</td>
+                      <td className={cellClass}>{deleteButton(() => void deleteStray(f), f.key, 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+          {check.missingFiles.length > 0 && (
+            <>
+              <h4 className="mt-3 font-semibold text-red-600">
+                S3 File Missing ({check.missingFiles.length} audio{check.missingFiles.length === 1 ? '' : 's'})
+              </h4>
+              <table className="mt-1 border-collapse text-sm">
+                <thead>
+                  <tr>
+                    <th className={`${cellClass} text-left`}>ID</th>
+                    <th className={`${cellClass} text-left`}>Says</th>
+                    <th className={`${cellClass} text-left`}>Used by</th>
+                    <th className={`${cellClass} text-left`}>File it should have</th>
+                    <th className={`${cellClass} text-left`}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {check.missingFiles.map((a) => (
+                    <tr key={a.id}>
+                      <td className={cellClass}>{a.id}</td>
+                      <td className={cellClass}>{a.text}</td>
+                      <td className={cellClass}>{usedBy(a.questionCount)}</td>
+                      <td className={`${cellClass} font-mono text-xs`}>{fileName(a.url)}</td>
+                      <td className={cellClass}>{deleteButton(() => void deleteAudio(a), String(a.id), a.questionCount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </section>
+      )}
 
-      {shown.length > 0 && (
-        <table className="mt-3 border-collapse">
+      {audios === null && !error && <p className="mt-3">Loading…</p>}
+      {audios && audios.length === 0 && <p className="mt-3 text-gray-600">No audio matches.</p>}
+
+      {audios && audios.length > 0 && (
+        <table className="mt-4 border-collapse text-sm">
           <thead>
             <tr>
-              <th className={`${cellClass} text-left`}>Audio</th>
-              <th className={`${cellClass} text-left`}>Text</th>
+              <th className={`${cellClass} text-left`}>ID</th>
+              <th className={`${cellClass} text-left`}>Says</th>
               <th className={`${cellClass} text-left`}>Status</th>
+              <th className={`${cellClass} text-left`}>Keywords</th>
+              <th className={`${cellClass} text-left`}>Voice</th>
               <th className={`${cellClass} text-left`}>Used by</th>
-              <th className={`${cellClass} text-left`}>Size</th>
-              <th className={`${cellClass} text-left`}>Stored</th>
-              <th className={`${cellClass} text-left`}>File</th>
+              <th className={`${cellClass} text-left`}>Saved</th>
+              <th className={`${cellClass} text-left`}>S3 file</th>
+              <th className={`${cellClass} text-left`}>Audio</th>
               <th className={`${cellClass} text-left`}></th>
             </tr>
           </thead>
           <tbody>
-            {shown.map((f) => {
-              const used = f.audio?.questionCount ?? 0;
-              return (
-                <tr key={f.key}>
-                  <td className={cellClass}>
-                    {f.size !== null ? (
-                      <audio src={f.url} controls preload="none" className="h-8 w-48" />
-                    ) : (
-                      <span className="text-sm text-gray-500">—</span>
-                    )}
-                  </td>
-                  <td className={`${cellClass} max-w-md`}>
-                    {f.audio ? (
-                      <>
-                        {f.audio.text}
-                        <div className="text-xs text-gray-500">
-                          #{f.audio.id} · {f.audio.provider} {f.audio.voice}
-                          {f.audio.keywords.length > 0 && ` · ${f.audio.keywords.join(', ')}`}
-                        </div>
-                      </>
-                    ) : (
-                      <span className="text-sm text-gray-500">(no database row)</span>
-                    )}
-                  </td>
-                  <td className={cellClass}>
-                    {f.size === null ? (
-                      <span className="text-red-600">S3 File Missing</span>
-                    ) : !f.audio ? (
-                      <span className="text-amber-700">No database row</span>
-                    ) : f.audio.kept ? (
-                      'Kept'
-                    ) : (
-                      <span className="text-gray-500">Not kept</span>
-                    )}
-                  </td>
-                  <td className={cellClass}>
-                    {f.audio ? `${used} question${used === 1 ? '' : 's'}` : '—'}
-                  </td>
-                  <td className={cellClass}>{f.size === null ? '—' : formatSize(f.size)}</td>
-                  <td className={cellClass}>
-                    {new Date(f.lastModified ?? f.audio?.createdAt ?? 0).toLocaleString()}
-                  </td>
-                  <td className={`${cellClass} font-mono text-xs`} title={f.key}>
-                    {fileName(f.key)}
-                  </td>
-                  <td className={cellClass}>
-                    <button
-                      type="button"
-                      onClick={() => void remove(f)}
-                      disabled={used > 0 || deleting !== null}
-                      title={used > 0 ? 'A question uses this audio: take it off the question first.' : undefined}
-                      className="my-1 rounded bg-red-600 px-2 font-bold text-white hover:opacity-90 disabled:opacity-40"
-                    >
-                      {deleting === f.key ? 'Deleting…' : 'Delete'}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+            {audios.map((a) => (
+              <tr key={a.id}>
+                <td className={cellClass}>{a.id}</td>
+                <td className={`${cellClass} max-w-xs`}>{a.text}</td>
+                <td className={cellClass}>{a.kept ? 'Kept' : <span className="text-gray-500">Not kept</span>}</td>
+                <td className={`${cellClass} max-w-[12rem]`}>{a.keywords.join(', ')}</td>
+                <td className={`${cellClass} text-xs`}>
+                  {a.provider}
+                  <div>{a.voice}</div>
+                </td>
+                <td className={`${cellClass} whitespace-nowrap`}>{usedBy(a.questionCount)}</td>
+                <td className={`${cellClass} whitespace-nowrap`}>
+                  {new Date(a.createdAt).toLocaleString()}
+                  {a.createdBy && <div className="text-xs text-gray-500">{a.createdBy}</div>}
+                </td>
+                <td className={`${cellClass} font-mono text-xs`} title={s3Key(a.url)}>
+                  {fileName(a.url)}
+                </td>
+                <td className={cellClass}>
+                  <audio src={a.url} controls preload="none" className="h-8 w-48" />
+                </td>
+                <td className={cellClass}>{deleteButton(() => void deleteAudio(a), String(a.id), a.questionCount)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
@@ -230,12 +334,29 @@ export default function ManageAudiosLibrary() {
   );
 }
 
-function fileName(key: string): string {
-  return key.slice(key.lastIndexOf('/') + 1);
+function usedBy(n: number): string {
+  return n === 0 ? 'no question' : `${n} question${n === 1 ? '' : 's'}`;
+}
+
+function fileName(keyOrUrl: string): string {
+  return keyOrUrl.slice(keyOrUrl.lastIndexOf('/') + 1);
+}
+
+// The S3 key in an audio's public URL (https://<bucket>.s3.<region>.amazonaws.com/<key>).
+function s3Key(url: string): string {
+  try {
+    return decodeURIComponent(new URL(url).pathname.slice(1));
+  } catch {
+    return url;
+  }
 }
 
 function formatSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
 }
 
 const cellClass = 'border-b border-[var(--border)] px-2 py-1';
