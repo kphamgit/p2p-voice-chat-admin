@@ -6,7 +6,7 @@ import { MediaField } from './MediaField';
 import { AudioField } from './AudioField';
 import { plainText, QUESTION_FORMATS, type Audio, type QuestionItem } from './item';
 import { ShadowingScoringOptions } from './ShadowingScoringOptions';
-import { scoringFormFrom, scoringOptionsFrom, stressWordsOf } from './scoring';
+import { scoringFormFrom, scoringOptionsFrom } from './scoring';
 import { VoiceField, type VoiceValue } from './VoiceField';
 
 // Modal for authoring an item in an item group. Without an `item` it creates one
@@ -76,9 +76,9 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   const [hideText, setHideText] = useState(item?.hideText ?? false);
   // Only applies to format 9 (Shadowing): its Scoring options (the saved ones, or the defaults).
   const [scoring, setScoring] = useState(() => scoringFormFrom(item?.scoringOptions));
-  const [stressWordsMissing, setStressWordsMissing] = useState(false); // outline the field after a Save without one
   const [uploading, setUploading] = useState(0); // images being uploaded right now
   const [saving, setSaving] = useState(false);
+  const [targetedMissing, setTargetedMissing] = useState(false); // outline Targeted words after a Save without one
   const [error, setError] = useState<string | null>(null);
 
   // Escape closes the modal (but not mid-save, so a pending request isn't orphaned).
@@ -202,12 +202,13 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
       setError('A Shadowing sentence is plain text: no brackets or slashes.');
       return;
     }
-    // A Shadowing is repeated after its audio, so it can't be saved without one.
-    if (isQuestion && isShadowing && !stressWordsOf(scoring)) {
-      setStressWordsMissing(true);
-      setError('A Shadowing question needs at least one stress word (Scoring options).');
+    // Evaluate Connected Speech checks the targeted words' links, so it needs one.
+    if (isQuestion && isShadowing && scoring.strictConnectedSpeech && !scoring.targetedWords.trim()) {
+      setTargetedMissing(true);
+      setError('Evaluate Connected Speech is on: type at least one targeted word (Scoring options), or uncheck it.');
       return;
     }
+    // A Shadowing is repeated after its audio, so it can't be saved without one.
     if (isQuestion && isShadowing && !mainVoice.audio) {
       setError('A Shadowing question needs audio: generate a voice, or pick one from the library.');
       return;
@@ -543,10 +544,10 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
                 value={scoring}
                 setValue={setScoring}
                 questionText={questionText}
-                showMissing={stressWordsMissing}
                 audio={mainVoice.audio}
                 token={token}
                 inputClass={inputClass}
+                targetedMissing={targetedMissing}
               />
             )}
 

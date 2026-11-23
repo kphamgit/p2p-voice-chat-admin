@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from './auth-context';
-import { apiFetch } from './api';
+import { apiFetch, apiFetchBlob } from './api';
+import { toWav, wavFileName } from './wav';
 import type { Audio } from './item';
 
 // An audio row as GET /audios/library returns it.
@@ -41,6 +42,7 @@ export default function ManageAudiosLibrary() {
   const [busy, setBusy] = useState<string | null>(null); // the row id or file key being deleted
   const [check, setCheck] = useState<CheckResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [converting, setConverting] = useState<number | null>(null); // the row whose WAV is being made
 
   useEffect(() => {
     let cancelled = false;
@@ -101,6 +103,29 @@ export default function ManageAudiosLibrary() {
       setError(errorText(err, 'Failed to delete the file.'));
     } finally {
       setBusy(null);
+    }
+  };
+
+  // The S3 file (an MP3, read through the server) converted to WAV in the
+  // browser, at its own sample rate, and saved as "<what it says>.wav".
+  const downloadWav = async (a: LibraryAudio) => {
+    if (converting !== null) return;
+    setConverting(a.id);
+    setError(null);
+    try {
+      const mp3 = await apiFetchBlob(`/audios/${a.id}/file`, token);
+      const url = URL.createObjectURL(await toWav(mp3));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = wavFileName(a.text);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setError(errorText(err, `Audio #${a.id} couldn't be converted to WAV.`));
+    } finally {
+      setConverting(null);
     }
   };
 
@@ -237,7 +262,7 @@ export default function ManageAudiosLibrary() {
                   {check.strayFiles.map((f) => (
                     <tr key={f.key}>
                       <td className={cellClass}>
-                        <audio src={f.url} controls preload="none" className="h-8 w-48" />
+                        <audio src={f.url} controls controlsList="nodownload" preload="none" className="h-8 w-48" />
                       </td>
                       <td className={`${cellClass} font-mono text-xs`} title={f.key}>
                         {fileName(f.key)}
@@ -322,9 +347,20 @@ export default function ManageAudiosLibrary() {
                   {fileName(a.url)}
                 </td>
                 <td className={cellClass}>
-                  <audio src={a.url} controls preload="none" className="h-8 w-48" />
+                  <audio src={a.url} controls controlsList="nodownload" preload="none" className="h-8 w-48" />
                 </td>
-                <td className={cellClass}>{deleteButton(() => void deleteAudio(a), String(a.id), a.questionCount)}</td>
+                <td className={`${cellClass} whitespace-nowrap`}>
+                  <button
+                    type="button"
+                    onClick={() => void downloadWav(a)}
+                    disabled={converting !== null}
+                    title="Download this S3 file as a WAV (converted from its MP3)"
+                    className="my-1 mr-2 rounded bg-blue-600 px-2 font-bold text-white hover:opacity-90 disabled:opacity-40"
+                  >
+                    {converting === a.id ? 'Converting…' : 'Download WAV'}
+                  </button>
+                  {deleteButton(() => void deleteAudio(a), String(a.id), a.questionCount)}
+                </td>
               </tr>
             ))}
           </tbody>

@@ -76,6 +76,7 @@ export interface ScoringOptions {
   strict_connected_speech: boolean; // check linking (always on when targeted_words is set)
   link_tolerance: number; // how much longer a pause between linked words may be than the reference's
   stress_words: string; // "accept, apology": the words whose syllable stress is checked
+  stress_words_ipa?: string; // display only: their American IPA, as JSON text {"apology": "əˈpɑlədʒi"} (older: "word: ipa, ...")
   stress_contrast_ratio: number; // share of the reference's stressed/unstressed contrast the student must reach
   melody_min_similarity: number; // how closely each stress word's melody must follow the reference's
   stress_source: StressSource; // who decides the right stressed syllable

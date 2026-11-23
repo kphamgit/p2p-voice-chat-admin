@@ -27,6 +27,7 @@ export interface TtsProvider {
 // nothing above 1; a provider only gets the ones it accepts (ElevenLabs:
 // 0.7 and up).
 const SPEEDS = [0.5, 0.6, 0.7, 0.8, 0.9, 1];
+const DEFAULT_RATE = 0.7;
 
 // Short provider marks put before voice names.
 export const PROVIDER_TAGS: Record<TtsProviderId, string> = { google: 'GG', elevenlabs: '11L' };
@@ -41,7 +42,8 @@ export function useTtsChoice(token: string | null, initialVoice?: string | null)
   const [chosenProvider, setProviderId] = useState<TtsProviderId | null>(null);
   // Voice picked per provider ('' or missing: the provider's default).
   const [chosenVoices, setChosenVoices] = useState<Partial<Record<TtsProviderId, string>>>({});
-  const [chosenRate, setRate] = useState(1);
+  // Starts slower than normal (0.7×), which suits learners; every provider offers it.
+  const [chosenRate, setRate] = useState(DEFAULT_RATE);
 
   useEffect(() => {
     let cancelled = false;
