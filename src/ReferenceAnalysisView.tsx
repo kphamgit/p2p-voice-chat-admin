@@ -43,6 +43,19 @@ export interface ReferenceWordAnalysis {
   syllables?: ReferenceSyllable[];
   melody?: ReferenceMelody | null;
   hyphenated?: string[] | null; // the syllables as spelled (added by the server), e.g. ["ac", "cept"]
+  syllabified?: Syllabified; // the IPA syllables (and Vietnamese code), display only
+}
+
+// A stress word's IPA syllables (from the teacher's IPA, else the dictionary), with the
+// Vietnamese pronunciation code split at its hyphens; each syllable's `viet` only when the
+// counts match.
+export interface Syllabified {
+  source: 'ipa' | 'cmu' | null;
+  syllabified: string | null; // e.g. "ə-ˈpɑ-lə-dʒi"
+  syllables: { text: string; stress: 'primary' | 'secondary' | null; viet?: string }[];
+  viet: string | null;
+  viet_syllables: string[];
+  viet_matches_ipa: boolean | null;
 }
 
 export interface ReferenceAnalysis {
@@ -83,6 +96,7 @@ export function ReferenceAnalysisView({ analysis: a }: { analysis: ReferenceWord
           )}
         </div>
       </div>
+      {a.syllabified && a.syllabified.syllables.length > 0 && <Pronunciation s={a.syllabified} />}
       {disagree && (
         <p className="m-0 text-amber-700">
           The reference audio stresses {name(a.reference_stressed_syllable)}, but the dictionary stresses{' '}
@@ -128,6 +142,43 @@ export function ReferenceAnalysisView({ analysis: a }: { analysis: ReferenceWord
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// The IPA syllables, each with its Vietnamese code part underneath (when the counts match), the
+// stressed one in bold; a warning when the Vietnamese code has a different number of parts.
+function Pronunciation({ s }: { s: Syllabified }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex flex-wrap items-end gap-x-1">
+        <span className="mr-1 self-start text-gray-500">
+          Pronunciation{s.source === 'cmu' ? ' (dictionary)' : ''}:
+        </span>
+        {s.syllables.map((syl, i) => (
+          <Fragment key={i}>
+            {i > 0 && <span className="self-start text-gray-400">-</span>}
+            <span className="inline-flex flex-col items-center leading-tight">
+              <span lang="und-fonipa" className={syl.stress === 'primary' ? 'font-bold text-gray-900' : ''}>
+                {syl.stress === 'primary' ? 'ˈ' : syl.stress === 'secondary' ? 'ˌ' : ''}
+                {syl.text}
+              </span>
+              {syl.viet && (
+                <span lang="vi" className={`text-xs text-gray-600 ${syl.stress === 'primary' ? 'font-bold' : ''}`}>
+                  {syl.viet}
+                </span>
+              )}
+            </span>
+          </Fragment>
+        ))}
+      </div>
+      {s.viet_matches_ipa === false && (
+        <p className="m-0 text-amber-700">
+          The Vietnamese code “{s.viet}” has {s.viet_syllables.length} part{s.viet_syllables.length === 1 ? '' : 's'}{' '}
+          but the IPA has {s.syllables.length} syllables, so it isn't shown with them. Use one part per syllable,
+          separated by hyphens.
+        </p>
       )}
     </div>
   );

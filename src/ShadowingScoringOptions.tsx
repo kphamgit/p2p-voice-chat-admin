@@ -98,6 +98,7 @@ export function ShadowingScoringOptions({
           stressWords: word.trim(),
           stressSource: value.stressSource,
           stressWordsIpa: { [key]: value.stressIpa[key] ?? '' },
+          stressWordsViet: { [key]: value.stressViet[key] ?? '' },
         },
       });
       const result = data.words.find((w) => sameWord(w.word, word)) ?? data.words[0];
@@ -229,7 +230,7 @@ export function ShadowingScoringOptions({
               const shown = current(refAnalyses[word.trim().toLowerCase()]);
               return (
                 <div key={i} className="flex flex-col gap-1">
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1">
                     <input
                       value={word}
                       onChange={(e) =>
@@ -254,6 +255,18 @@ export function ShadowingScoringOptions({
                       title="Optional: the word's American IPA pronunciation guide, e.g. əˈpɑlədʒi. Shown with the results; it doesn't change the score."
                       lang="und-fonipa"
                       className={`${inputClass} w-48 disabled:opacity-50`}
+                    />
+                    <input
+                      value={value.stressViet[word.trim().toLowerCase()] ?? ''}
+                      onChange={(e) =>
+                        set('stressViet', { ...value.stressViet, [word.trim().toLowerCase()]: e.target.value })
+                      }
+                      disabled={!word.trim()}
+                      placeholder={i === 0 ? 'Vietnamese, e.g. ơ-pô-lơ-di' : 'Vietnamese (optional)'}
+                      aria-label={`Vietnamese pronunciation code of stress word ${i + 1}`}
+                      title="Optional: the word's pronunciation written the Vietnamese way, one part per syllable, separated by hyphens (ơ-pô-lơ-di). Shown under the IPA syllables in the results when the number of parts matches; it doesn't change the score."
+                      lang="vi"
+                      className={`${inputClass} w-44 disabled:opacity-50`}
                     />
                     {(list.length > 1 || word !== '') && (
                       <button

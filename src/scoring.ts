@@ -14,13 +14,16 @@ import {
 // A Shadowing question's Scoring options while the item form edits them (see
 // ShadowingScoringOptions). Stress words are one field each; they're saved
 // joined as "accept, apology". Each word's IPA (optional, display only) is
-// kept by the lower-cased word and saved as stress_words_ipa, JSON text.
+// kept by the lower-cased word and saved as stress_words_ipa, JSON text; its
+// Vietnamese pronunciation code (optional, display only, syllables separated by
+// hyphens: "ơ-pô-lơ-di") likewise, as stress_words_viet.
 export interface ScoringForm {
   targetedWords: string;
   strictConnectedSpeech: boolean;
   linkTolerance: number;
   stressWordList: string[];
   stressIpa: Record<string, string>; // lower-cased stress word → its American IPA
+  stressViet: Record<string, string>; // lower-cased stress word → its Vietnamese pronunciation code
   stressContrastRatio: number;
   melodyMinSimilarity: number;
   stressSource: StressSource;
@@ -40,6 +43,7 @@ export function scoringFormFrom(saved: ScoringOptions | null | undefined): Scori
     linkTolerance: saved?.link_tolerance ?? DEFAULT_LINK_TOLERANCE,
     stressWordList: words.length ? words : [''],
     stressIpa: parseStressIpa(saved?.stress_words_ipa),
+    stressViet: parseStressIpa(saved?.stress_words_viet),
     stressContrastRatio: saved?.stress_contrast_ratio ?? DEFAULT_STRESS_CONTRAST_RATIO,
     melodyMinSimilarity: saved?.melody_min_similarity ?? DEFAULT_MELODY_MIN_SIMILARITY,
     stressSource: saved?.stress_source ?? DEFAULT_STRESS_SOURCE,
@@ -48,7 +52,7 @@ export function scoringFormFrom(saved: ScoringOptions | null | undefined): Scori
   };
 }
 
-// Saved stress_words_ipa → { word: ipa }: JSON text, or the older
+// Saved stress_words_ipa (or stress_words_viet) → { word: ipa }: JSON text, or the older
 // "accept: əkˈsɛpt, apology: əˈpɑlədʒi" pairs (as VoiceAnalyzer reads both).
 export function parseStressIpa(text: string | null | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -80,12 +84,29 @@ export function parseStressIpa(text: string | null | undefined): Record<string, 
 // The stress words' IPA as saved: JSON text of { word: ipa } for the current
 // stress words that have one; '' when none do.
 export function stressIpaOf(form: ScoringForm): string {
+  return wordPairsOf(form, form.stressIpa);
+}
+
+// The stress words' Vietnamese pronunciation code as saved, the same way.
+export function stressVietOf(form: ScoringForm): string {
+  return wordPairsOf(form, form.stressViet);
+}
+
+function wordPairsOf(form: ScoringForm, values: Record<string, string>): string {
   const entries = form.stressWordList
     .map((w) => w.trim())
     .filter(Boolean)
-    .map((w) => [w.toLowerCase(), (form.stressIpa[w.toLowerCase()] ?? '').trim()] as const)
-    .filter(([, ipa]) => ipa !== '');
+    .map((w) => [w.toLowerCase(), (values[w.toLowerCase()] ?? '').trim()] as const)
+    .filter(([, v]) => v !== '');
   return entries.length ? JSON.stringify(Object.fromEntries(entries)) : '';
+}
+
+// "ơ-pô-lơ-di" → ["ơ", "pô", "lơ", "di"], split as VoiceAnalyzer does.
+export function vietParts(code: string): string[] {
+  return code
+    .split(/[-‐‑–—]/)
+    .map((p) => p.trim())
+    .filter(Boolean);
 }
 
 // "accept, apology" from the stress word fields.
@@ -112,6 +133,7 @@ export function scoringOptionsFrom(form: ScoringForm): ScoringOptions {
     link_tolerance: strict ? form.linkTolerance : DEFAULT_LINK_TOLERANCE,
     stress_words: words,
     stress_words_ipa: stressIpaOf(form),
+    stress_words_viet: stressVietOf(form),
     stress_contrast_ratio: words ? form.stressContrastRatio : DEFAULT_STRESS_CONTRAST_RATIO,
     melody_min_similarity: words ? form.melodyMinSimilarity : DEFAULT_MELODY_MIN_SIMILARITY,
     stress_source: form.stressSource,
