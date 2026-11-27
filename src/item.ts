@@ -73,8 +73,9 @@ export type StressSource = 'dictionary' | 'reference';
 
 export interface ScoringOptions {
   targeted_words: string; // words that should link to the next one, e.g. "is" (is_a)
+  helper_words?: Record<string, string>; // display only: { targeted word (lower case): helper word }, shown to the student under that word's link, e.g. { have: "vờ" }
   strict_connected_speech: boolean; // check linking (always on when targeted_words is set)
-  link_tolerance: number; // how much longer a pause between linked words may be than the reference's
+  link_tolerance?: number; // no longer used or saved (the link checker's limits are fixed); older questions may still have it
   stress_words: string; // "accept, apology": the words whose syllable stress is checked
   stress_words_ipa?: string; // display only: their American IPA, as JSON text {"apology": "əˈpɑlədʒi"} (older: "word: ipa, ...")
   stress_words_viet?: string; // display only: their Vietnamese pronunciation code, syllables separated by hyphens, as JSON text {"apology": "ơ-pô-lơ-di"}
@@ -88,8 +89,7 @@ export interface ScoringOptions {
 // The teacher panel's defaults (phuyenenglish.com, shadowing/evaluation.ts).
 export const DEFAULT_FALL_MATCH_RATIO = 0.75;
 export const DEFAULT_RISE_MATCH_RATIO = 0.5;
-export const DEFAULT_LINK_TOLERANCE = 1;
-export const LINK_PAUSE_MARGIN_MS = 25; // the extra pause allowed at 1×
+export const LINK_MAX_PAUSE_MS = 80; // the pause allowed between linked words (the link checker's fixed limit)
 export const DEFAULT_STRESS_CONTRAST_RATIO = 0.6;
 export const DEFAULT_MELODY_MIN_SIMILARITY = 0.35;
 export const DEFAULT_STRESS_SOURCE: StressSource = 'dictionary';

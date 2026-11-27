@@ -50,10 +50,14 @@ export interface ReferenceWordAnalysis {
 // Vietnamese pronunciation code split at its hyphens; each syllable's `viet` only when the
 // counts match.
 export interface Syllabified {
-  source: 'ipa' | 'cmu' | null;
+  source: 'ipa' | 'cmu' | null; // the teacher's IPA, or made from the CMU dictionary
+  ipa: string | null; // the teacher's IPA as sent
+  cmu_syllable_count: number | null; // the syllables the analyzer measures in the audio
+  matches_cmu: boolean | null;
   syllabified: string | null; // e.g. "ə-ˈpɑ-lə-dʒi"
   syllables: { text: string; stress: 'primary' | 'secondary' | null; viet?: string }[];
   viet: string | null;
+  viet_source?: 'client' | 'cmu' | null; // the teacher's code, or made from the CMU dictionary
   viet_syllables: string[];
   viet_matches_ipa: boolean | null;
 }
@@ -154,7 +158,7 @@ function Pronunciation({ s }: { s: Syllabified }) {
     <div className="flex flex-col gap-0.5">
       <div className="flex flex-wrap items-end gap-x-1">
         <span className="mr-1 self-start text-gray-500">
-          Pronunciation{s.source === 'cmu' ? ' (dictionary)' : ''}:
+          Pronunciation:
         </span>
         {s.syllables.map((syl, i) => (
           <Fragment key={i}>
@@ -173,11 +177,26 @@ function Pronunciation({ s }: { s: Syllabified }) {
           </Fragment>
         ))}
       </div>
-      {s.viet_matches_ipa === false && (
+      <span className="text-xs text-gray-500">
+        IPA: {s.source === 'ipa' ? 'yours' : 'made from the CMU dictionary (type one to replace it)'}
+      </span>
+      {s.source === 'ipa' && s.matches_cmu === false && (
         <p className="m-0 text-amber-700">
-          The Vietnamese code “{s.viet}” has {s.viet_syllables.length} part{s.viet_syllables.length === 1 ? '' : 's'}{' '}
-          but the IPA has {s.syllables.length} syllables, so it isn't shown with them. Use one part per syllable,
-          separated by hyphens.
+          Your IPA has {s.syllables.length} syllable{s.syllables.length === 1 ? '' : 's'}, but the analyzer splits this
+          word into {s.cmu_syllable_count} (the CMU dictionary's count), so the labels won't line up with the melody
+          chart and students won't see them there.
+        </p>
+      )}
+      {s.viet && s.viet_matches_ipa && (
+        <span className="text-xs text-gray-500">
+          Vietnamese: {s.viet_source === 'client' ? 'yours' : 'made from the CMU dictionary (type one to replace it)'}
+        </span>
+      )}
+      {s.viet && s.viet_matches_ipa === false && (
+        <p className="m-0 text-amber-700">
+          Vietnamese{s.viet_source === 'client' ? '' : ' (made from the CMU dictionary)'}:{' '}
+          <span lang="vi">{s.viet}</span>. Its parts don't line up with the {s.syllables.length} IPA syllables, so
+          students see it on its own line.{s.viet_source === 'client' ? ' Use one part per syllable, separated by hyphens.' : ''}
         </p>
       )}
     </div>

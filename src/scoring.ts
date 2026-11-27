@@ -1,6 +1,5 @@
 import {
   DEFAULT_FALL_MATCH_RATIO,
-  DEFAULT_LINK_TOLERANCE,
   DEFAULT_MELODY_MIN_SIMILARITY,
   DEFAULT_RISE_MATCH_RATIO,
   DEFAULT_STRESS_CONTRAST_RATIO,
@@ -19,8 +18,8 @@ import {
 // hyphens: "ơ-pô-lơ-di") likewise, as stress_words_viet.
 export interface ScoringForm {
   targetedWords: string;
+  helperWords: Record<string, string>; // lower-cased targeted word → its helper word (kept for removed words, in case they come back)
   strictConnectedSpeech: boolean;
-  linkTolerance: number;
   stressWordList: string[];
   stressIpa: Record<string, string>; // lower-cased stress word → its American IPA
   stressViet: Record<string, string>; // lower-cased stress word → its Vietnamese pronunciation code
@@ -39,8 +38,8 @@ export function scoringFormFrom(saved: ScoringOptions | null | undefined): Scori
     .filter(Boolean);
   return {
     targetedWords: saved?.targeted_words ?? '',
+    helperWords: { ...(saved?.helper_words ?? {}) },
     strictConnectedSpeech: saved?.strict_connected_speech ?? false,
-    linkTolerance: saved?.link_tolerance ?? DEFAULT_LINK_TOLERANCE,
     stressWordList: words.length ? words : [''],
     stressIpa: parseStressIpa(saved?.stress_words_ipa),
     stressViet: parseStressIpa(saved?.stress_words_viet),
@@ -96,14 +95,21 @@ function wordPairsOf(form: ScoringForm, values: Record<string, string>): string 
   const entries = form.stressWordList
     .map((w) => w.trim())
     .filter(Boolean)
-    .map((w) => [w.toLowerCase(), (values[w.toLowerCase()] ?? '').trim()] as const)
+    .map((w) => [w.toLowerCase(), unwrap(values[w.toLowerCase()] ?? '')] as const)
     .filter(([, v]) => v !== '');
   return entries.length ? JSON.stringify(Object.fromEntries(entries)) : '';
 }
 
-// "ơ-pô-lơ-di" → ["ơ", "pô", "lơ", "di"], split as VoiceAnalyzer does.
+// A pronunciation without the slashes or brackets around it, as VoiceAnalyzer
+// reads it: "/fá-mờ-lì/" → "fá-mờ-lì", "[əˈpɑlədʒi]" → "əˈpɑlədʒi".
+function unwrap(text: string): string {
+  return text.trim().replace(/^[/[\]\s]+|[/[\]\s]+$/g, '');
+}
+
+// "ơ-pô-lơ-di" → ["ơ", "pô", "lơ", "di"], split as VoiceAnalyzer does (after
+// unwrap).
 export function vietParts(code: string): string[] {
-  return code
+  return unwrap(code)
     .split(/[-‐‑–—]/)
     .map((p) => p.trim())
     .filter(Boolean);
@@ -117,9 +123,32 @@ export function stressWordsOf(form: ScoringForm): string {
     .join(', ');
 }
 
+// The targeted words, lower case, each once, split as VoiceAnalyzer does (letters and apostrophes).
+export function targetedWordListOf(form: ScoringForm): string[] {
+  return [...new Set(form.targetedWords.toLowerCase().match(/[a-z']+/g) ?? [])];
+}
+
+// The helper words as saved: { word: helper word } for the current targeted words that have one.
+export function helperWordsOf(form: ScoringForm): Record<string, string> {
+  return Object.fromEntries(
+    targetedWordListOf(form).flatMap((w) => {
+      const helper = form.helperWords[w]?.trim();
+      return helper ? [[w, helper]] : [];
+    }),
+  );
+}
+
 // Linking is always checked when targeted words are given.
 export function isStrict(form: ScoringForm): boolean {
   return form.strictConnectedSpeech || form.targetedWords.trim() !== '';
+}
+
+// Connected Speech only: targeted words and no stress words. Linking is
+// checked in the student's recording alone, so such a question may have no
+// audio; word stress needs the audio (the reference). The same rule as the
+// teacher panel, the server and VoiceAnalyzer.
+export function isConnectedSpeechOnly(form: ScoringForm): boolean {
+  return targetedWordListOf(form).length > 0 && stressWordsOf(form) === '';
 }
 
 // The options as saved, exactly as the teacher panel sends them: a hidden
@@ -129,8 +158,8 @@ export function scoringOptionsFrom(form: ScoringForm): ScoringOptions {
   const words = stressWordsOf(form);
   return {
     targeted_words: form.targetedWords.trim(),
+    helper_words: helperWordsOf(form),
     strict_connected_speech: strict,
-    link_tolerance: strict ? form.linkTolerance : DEFAULT_LINK_TOLERANCE,
     stress_words: words,
     stress_words_ipa: stressIpaOf(form),
     stress_words_viet: stressVietOf(form),

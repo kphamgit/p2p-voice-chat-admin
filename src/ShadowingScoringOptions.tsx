@@ -1,19 +1,18 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import {
   DEFAULT_FALL_MATCH_RATIO,
-  DEFAULT_LINK_TOLERANCE,
   DEFAULT_MELODY_MIN_SIMILARITY,
   DEFAULT_RISE_MATCH_RATIO,
   DEFAULT_STRESS_CONTRAST_RATIO,
   DEFAULT_STRESS_SOURCE,
   LEGACY_STRESS_ENABLED,
-  LINK_PAUSE_MARGIN_MS,
+  LINK_MAX_PAUSE_MS,
   RISING_TONE_ENABLED,
   type Audio,
 } from './item';
 import { apiFetch } from './api';
 import { ReferenceAnalysisView, type ReferenceAnalysis, type ReferenceWordAnalysis } from './ReferenceAnalysisView';
-import { isStrict, stressWordsOf, type ScoringForm } from './scoring';
+import { isStrict, stressWordsOf, targetedWordListOf, type ScoringForm } from './scoring';
 
 // A Shadowing question's (format 9) Scoring options in the item form, copied
 // from the Scoring options of the teacher's Shadowing panel in
@@ -68,6 +67,15 @@ export function ShadowingScoringOptions({
       (questionText.match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) ?? []).map((w) => [w.toLowerCase(), w] as const),
     ).values(),
   );
+  // The word after `word`'s first use in the question text (lower case), for showing its connected
+  // pair ("is" → "is_a"); null when it isn't there or is the last word.
+  const textWords = (questionText.match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) ?? []).map((w) =>
+    w.toLowerCase().replace(/’/g, "'"),
+  );
+  const nextWordAfter = (word: string) => {
+    const i = textWords.indexOf(word);
+    return i >= 0 && i + 1 < textWords.length ? textWords[i + 1]! : null;
+  };
   const sameWord = (a: string, b: string) => a.trim().toLowerCase() === b.toLowerCase();
   const isStressWord = (word: string) => list.some((w) => sameWord(w, word));
   // Never leaves the list without a field to type in.
@@ -110,28 +118,65 @@ export function ShadowingScoringOptions({
   };
 
   return (
-    <fieldset className="flex flex-col gap-3 rounded border border-gray-300 p-3">
-      <legend className="px-1">Scoring options</legend>
-
-      {/* Connected Speech: which words must link to the next one. */}
-      <section aria-labelledby="scoring-connected" className="flex flex-col gap-3 rounded border border-gray-200 p-3">
-        <h4 id="scoring-connected" className="m-0 text-base font-semibold">
+    <>
+      {/* Connected Speech: which words must link to the next one. Its own section, outside
+          Scoring options: it's checked in the student's recording alone (no reference). */}
+      <fieldset className="flex flex-col gap-3 rounded border border-gray-300 p-3">
+        <legend className="px-1">
           Connected Speech
-        </h4>
+        </legend>
+        <p className="m-0 text-sm font-normal text-gray-600">
+          Checked in the student's recording only: the reference voice (the question's audio) isn't used. A question
+          that checks Connected Speech only (targeted words, no stress words) can be saved without audio.
+        </p>
         <div className="flex flex-wrap items-end gap-4 font-normal">
-          <label className="flex flex-col gap-1">
-            <span className="text-sm">
-              Targeted words {strict ? <span className="text-red-600">(required)</span> : '(optional)'}
-            </span>
-            <input
-              value={value.targetedWords}
-              onChange={(e) => set('targetedWords', e.target.value)}
-              placeholder="e.g. is"
-              title="Word(s) that should link to the next word, e.g. is → is_a. Required when Evaluate Connected Speech is on."
-              aria-required={strict}
-              className={`${inputClass} w-48 ${targetedMissing && strict && !value.targetedWords.trim() ? 'border-red-600' : ''}`}
-            />
-          </label>
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">
+                Targeted words {strict ? <span className="text-red-600">(required)</span> : '(optional)'}
+              </span>
+              <input
+                value={value.targetedWords}
+                onChange={(e) => set('targetedWords', e.target.value)}
+                placeholder="e.g. is"
+                title="Word(s) that should link to the next word, e.g. is → is_a. Required when Evaluate Connected Speech is on."
+                aria-required={strict}
+                className={`${inputClass} w-48 ${targetedMissing && strict && !value.targetedWords.trim() ? 'border-red-600' : ''}`}
+              />
+            </label>
+            <p className="m-0 max-w-xs text-xs text-gray-500">
+              Type only the <strong>first word</strong> of each connected word pair: “is” for “is_a”. Separate several
+              with commas (is, have).
+            </p>
+            {/* One line per connected word pair: the pair, then its Helper Word (optional), which the
+                student sees under that link. */}
+            {targetedWordListOf(value).map((w) => {
+              const next = nextWordAfter(w);
+              return (
+                <div key={w} className="flex flex-wrap items-center gap-2">
+                  <span
+                    className="min-w-24 font-mono text-sm"
+                    title={next ? undefined : `“${w}” isn't followed by another word in the question text`}
+                  >
+                    {w}_{next ?? <span className="text-gray-400">?</span>}
+                  </span>
+                  <label className="flex items-center gap-1">
+                    <span className="text-sm">Helper Word</span>
+                    <input
+                      value={value.helperWords[w] ?? ''}
+                      onChange={(e) =>
+                        setValue((f) => ({ ...f, helperWords: { ...f.helperWords, [w]: e.target.value } }))
+                      }
+                      placeholder="e.g. vờ"
+                      aria-label={`Helper Word for ${w}`}
+                      title={`Optional: shown to the student under the link from “${w}” to the next word`}
+                      className={`${inputClass} w-40`}
+                    />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
           <label
             className="flex items-center gap-2 self-center"
             title={
@@ -148,227 +193,229 @@ export function ShadowingScoringOptions({
             />
             Evaluate Connected Speech
           </label>
-          {/* Only matters when missed links are penalised (strict on, or targeted words given). */}
-          {strict && <LinkToleranceSlider value={value.linkTolerance} onChange={(v) => set('linkTolerance', v)} />}
         </div>
-      </section>
+      </fieldset>
 
-      {/* Stress/Melody: the stress words' stressed syllable and pitch melody. */}
-      <section aria-labelledby="scoring-stress" className="flex flex-col gap-3 rounded border border-gray-200 p-3">
-        <h4 id="scoring-stress" className="m-0 text-base font-semibold">
-          Stress/Melody
-        </h4>
+      <fieldset className="flex flex-col gap-3 rounded border border-gray-300 p-3">
+        <legend className="px-1">Scoring options</legend>
 
-        {/* Where the right stressed syllable of each stress word comes from. */}
-        <div
-          role="radiogroup"
-          aria-label="Stress pattern source"
-          className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm font-normal"
-        >
-          {(
-            [
-              ['dictionary', 'Use stress pattern from CMU dictionary'],
-              ['reference', 'Use stress pattern from reference audio'],
-            ] as const
-          ).map(([source, label]) => (
-            <label key={source} className="flex cursor-pointer items-center gap-1.5">
-              <input
-                type="radio"
-                name="stress-source"
-                value={source}
-                checked={value.stressSource === source}
-                onChange={() => set('stressSource', source)}
-              />
-              {label}
-              {source === DEFAULT_STRESS_SOURCE && <span className="text-gray-500">(default)</span>}
-            </label>
-          ))}
-        </div>
-        {value.stressSource === 'dictionary' && (
-          <p className="-mt-1 mb-0 text-xs font-normal text-gray-500">
-            The reference audio decides only when the dictionary can't: the last word of a Yes/No question, a word that
-            isn't in the dictionary, or a word with two stress patterns (record, present).
-          </p>
-        )}
+        {/* Stress/Melody: the stress words' stressed syllable and pitch melody. */}
+        <section aria-labelledby="scoring-stress" className="flex flex-col gap-3 rounded border border-gray-200 p-3">
+          <h4 id="scoring-stress" className="m-0 text-base font-semibold">
+            Stress/Melody
+          </h4>
 
-        {sentenceWords.length > 0 && (
-          <div className="flex flex-col gap-1 font-normal">
-            <span className="text-sm text-gray-600">Click the words to stress-check (click again to remove):</span>
-            <div className="flex flex-wrap gap-1.5">
-              {sentenceWords.map((word) => {
-                const on = isStressWord(word);
-                return (
-                  <button
-                    key={word.toLowerCase()}
-                    type="button"
-                    onClick={() => toggleStressWord(word)}
-                    aria-pressed={on}
-                    className={`rounded border px-2 py-1 text-sm ${
-                      on
-                        ? 'border-blue-700 bg-blue-600 text-white hover:bg-blue-800'
-                        : 'border-gray-300 text-[var(--text-h)] hover:bg-gray-100'
-                    }`}
-                  >
-                    {word}
-                  </button>
-                );
-              })}
-            </div>
+          {/* Where the right stressed syllable of each stress word comes from. */}
+          <div
+            role="radiogroup"
+            aria-label="Stress pattern source"
+            className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm font-normal"
+          >
+            {(
+              [
+                ['dictionary', 'Use stress pattern from CMU dictionary'],
+                ['reference', 'Use stress pattern from reference audio'],
+              ] as const
+            ).map(([source, label]) => (
+              <label key={source} className="flex cursor-pointer items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="stress-source"
+                  value={source}
+                  checked={value.stressSource === source}
+                  onChange={() => set('stressSource', source)}
+                />
+                {label}
+                {source === DEFAULT_STRESS_SOURCE && <span className="text-gray-500">(default)</span>}
+              </label>
+            ))}
           </div>
-        )}
-
-        <div className="flex flex-wrap items-end gap-4 font-normal">
-          {/* Word Syllables Stress Check: which syllable is stressed inside each word given here. */}
-          <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
-            <legend className="mb-1 text-sm">
-              Stress words (optional){' '}
-              <span className="text-gray-500">
-                The multi-syllable words checked for syllable stress pattern. Leave empty to check connected speech only.
-              </span>
-            </legend>
-            {list.map((word, i) => {
-              const shown = current(refAnalyses[word.trim().toLowerCase()]);
-              return (
-                <div key={i} className="flex flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-1">
-                    <input
-                      value={word}
-                      onChange={(e) =>
-                        set(
-                          'stressWordList',
-                          list.map((w, j) => (j === i ? e.target.value : w)),
-                        )
-                      }
-                      placeholder={i === 0 ? 'e.g. apology' : 'another word'}
-                      aria-label={`Stress word ${i + 1}`}
-                      title="A multi-syllable word whose syllable stress is checked against the reference (Word Syllables Stress Check)."
-                      className={`${inputClass} w-56`}
-                    />
-                    <input
-                      value={value.stressIpa[word.trim().toLowerCase()] ?? ''}
-                      onChange={(e) =>
-                        set('stressIpa', { ...value.stressIpa, [word.trim().toLowerCase()]: e.target.value })
-                      }
-                      disabled={!word.trim()}
-                      placeholder={i === 0 ? 'IPA, e.g. əˈpɑlədʒi' : 'IPA (optional)'}
-                      aria-label={`American IPA of stress word ${i + 1}`}
-                      title="Optional: the word's American IPA pronunciation guide, e.g. əˈpɑlədʒi. Shown with the results; it doesn't change the score."
-                      lang="und-fonipa"
-                      className={`${inputClass} w-48 disabled:opacity-50`}
-                    />
-                    <input
-                      value={value.stressViet[word.trim().toLowerCase()] ?? ''}
-                      onChange={(e) =>
-                        set('stressViet', { ...value.stressViet, [word.trim().toLowerCase()]: e.target.value })
-                      }
-                      disabled={!word.trim()}
-                      placeholder={i === 0 ? 'Vietnamese, e.g. ơ-pô-lơ-di' : 'Vietnamese (optional)'}
-                      aria-label={`Vietnamese pronunciation code of stress word ${i + 1}`}
-                      title="Optional: the word's pronunciation written the Vietnamese way, one part per syllable, separated by hyphens (ơ-pô-lơ-di). Shown under the IPA syllables in the results when the number of parts matches; it doesn't change the score."
-                      lang="vi"
-                      className={`${inputClass} w-44 disabled:opacity-50`}
-                    />
-                    {(list.length > 1 || word !== '') && (
-                      <button
-                        type="button"
-                        onClick={() => setStressFields(list.filter((_, j) => j !== i))}
-                        aria-label={`Remove stress word ${i + 1}`}
-                        title="Remove"
-                        className="h-8 w-8 rounded p-0 text-lg leading-none text-gray-500 hover:bg-gray-200 hover:text-gray-900"
-                      >
-                        ×
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => void analyzeReference(word)}
-                      disabled={!word.trim() || !audio || shown?.loading}
-                      title={
-                        !audio
-                          ? 'Generate a voice (or pick one from the library) for this question first'
-                          : "Measure this word's stressed syllable and melody in the question's audio"
-                      }
-                      className="rounded border border-gray-300 px-2 py-1 text-sm hover:bg-gray-100 disabled:opacity-50"
-                    >
-                      {shown?.loading ? 'Analyzing…' : 'Analyze reference audio'}
-                    </button>
-                  </div>
-                  {shown?.result && <ReferenceAnalysisView analysis={shown.result} />}
-                  {shown?.error && <p className="m-0 text-sm text-red-600">⚠️ {shown.error}</p>}
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => set('stressWordList', [...list, ''])}
-              className="self-start p-0 text-sm text-blue-700 hover:underline"
-            >
-              + Add a word
-            </button>
-          </fieldset>
-          {stressWords !== '' && (
-            <RatioSlider
-              label="Stress contrast"
-              hint="How much of the reference's contrast between the stressed syllable and the others (within the word) the student must reach. Lower = more lenient."
-              value={value.stressContrastRatio}
-              defaultValue={DEFAULT_STRESS_CONTRAST_RATIO}
-              onChange={(v) => set('stressContrastRatio', v)}
-            />
-          )}
-          {stressWords !== '' && (
-            <p className="m-0 self-center text-sm text-gray-500">
-              Suggestion: 50–60% for beginners, 75% for most classes, 90–100% for advanced students.
+          {value.stressSource === 'dictionary' && (
+            <p className="-mt-1 mb-0 text-xs font-normal text-gray-500">
+              The reference audio decides only when the dictionary can't: the last word of a Yes/No question, a word that
+              isn't in the dictionary, or a word with two stress patterns (record, present).
             </p>
           )}
-          {stressWords !== '' && (
-            <RatioSlider
-              label="Melody match"
-              suffix="similarity"
-              min={0.1}
-              max={0.9}
-              hint="How closely the student's pitch shape through each stress word must follow the reference's to count as 'Same melody'. Higher = stricter. Shown with the results, not counted in the score."
-              value={value.melodyMinSimilarity}
-              defaultValue={DEFAULT_MELODY_MIN_SIMILARITY}
-              onChange={(v) => set('melodyMinSimilarity', v)}
-            />
-          )}
-          {stressWords !== '' && (
-            <p className="m-0 self-center text-sm text-gray-500">Lenient 30–40%, moderate 50%, strict 70% or more.</p>
-          )}
-          {/* Paused: replaced by the Word Syllables Stress Check (code kept, as in the teacher panel). */}
-          {LEGACY_STRESS_ENABLED && (
-            <RatioSlider
-              label="Falling tone"
-              hint="How far an unstressed syllable must drop compared with the reference (e.g. “-ther” in “mother”). Lower = more lenient."
-              value={value.fallMatchRatio}
-              defaultValue={DEFAULT_FALL_MATCH_RATIO}
-              onChange={(v) => set('fallMatchRatio', v)}
-            />
-          )}
-          {/* Paused: sentence-level intonation that spans words (code kept). */}
-          {RISING_TONE_ENABLED && (
-            <RatioSlider
-              label="Rising tone"
-              hint="How far the voice must rise at the end of a Yes/No question compared with the reference. Lower = more lenient."
-              value={value.riseMatchRatio}
-              defaultValue={DEFAULT_RISE_MATCH_RATIO}
-              onChange={(v) => set('riseMatchRatio', v)}
-            />
-          )}
-        </div>
-      </section>
 
-      <button
-        type="button"
-        onClick={() => setShowHelp((v) => !v)}
-        aria-expanded={showHelp}
-        aria-controls="scoring-help"
-        className="self-start rounded border border-blue-600 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-50"
-      >
-        {showHelp ? 'Hide help' : 'Help'}
-      </button>
-      {showHelp && <ScoringHelp onClose={() => setShowHelp(false)} />}
-    </fieldset>
+          {sentenceWords.length > 0 && (
+            <div className="flex flex-col gap-1 font-normal">
+              <span className="text-sm text-gray-600">Click the words to stress-check (click again to remove):</span>
+              <div className="flex flex-wrap gap-1.5">
+                {sentenceWords.map((word) => {
+                  const on = isStressWord(word);
+                  return (
+                    <button
+                      key={word.toLowerCase()}
+                      type="button"
+                      onClick={() => toggleStressWord(word)}
+                      aria-pressed={on}
+                      className={`rounded border px-2 py-1 text-sm ${
+                        on
+                          ? 'border-blue-700 bg-blue-600 text-white hover:bg-blue-800'
+                          : 'border-gray-300 text-[var(--text-h)] hover:bg-gray-100'
+                      }`}
+                    >
+                      {word}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-end gap-4 font-normal">
+            {/* Word Syllables Stress Check: which syllable is stressed inside each word given here. */}
+            <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
+              <legend className="mb-1 text-sm">
+                Stress words (optional){' '}
+                <span className="text-gray-500">
+                  The multi-syllable words checked for syllable stress pattern. Leave empty to check connected speech only.
+                </span>
+              </legend>
+              {list.map((word, i) => {
+                const shown = current(refAnalyses[word.trim().toLowerCase()]);
+                return (
+                  <div key={i} className="flex flex-col gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <input
+                        value={word}
+                        onChange={(e) =>
+                          set(
+                            'stressWordList',
+                            list.map((w, j) => (j === i ? e.target.value : w)),
+                          )
+                        }
+                        placeholder={i === 0 ? 'e.g. apology' : 'another word'}
+                        aria-label={`Stress word ${i + 1}`}
+                        title="A multi-syllable word whose syllable stress is checked against the reference (Word Syllables Stress Check)."
+                        className={`${inputClass} w-56`}
+                      />
+                      <input
+                        value={value.stressIpa[word.trim().toLowerCase()] ?? ''}
+                        onChange={(e) =>
+                          set('stressIpa', { ...value.stressIpa, [word.trim().toLowerCase()]: e.target.value })
+                        }
+                        disabled={!word.trim()}
+                        placeholder={i === 0 ? 'IPA (auto), e.g. əˈpɑlədʒi' : 'IPA (auto)'}
+                        aria-label={`American IPA of stress word ${i + 1}`}
+                        title="Optional: leave empty to use the American IPA made from the CMU dictionary (click Analyze reference audio to see it). Type one here to replace it, with ˈ before the stressed syllable, e.g. əˈpɑlədʒi. Shown with the results; it doesn't change the score."
+                        lang="und-fonipa"
+                        className={`${inputClass} w-48 disabled:opacity-50`}
+                      />
+                      <input
+                        value={value.stressViet[word.trim().toLowerCase()] ?? ''}
+                        onChange={(e) =>
+                          set('stressViet', { ...value.stressViet, [word.trim().toLowerCase()]: e.target.value })
+                        }
+                        disabled={!word.trim()}
+                        placeholder={i === 0 ? 'Vietnamese (auto), e.g. ơ-pô-lơ-di' : 'Vietnamese (auto)'}
+                        aria-label={`Vietnamese pronunciation code of stress word ${i + 1}`}
+                        title="Optional: leave empty to use the Vietnamese pronunciation code made from the CMU dictionary (click Analyze reference audio to see it). Type one here to replace it: one part per syllable, separated by hyphens (ơ-pô-lơ-di). Shown under the IPA syllables in the results; it doesn't change the score."
+                        lang="vi"
+                        className={`${inputClass} w-44 disabled:opacity-50`}
+                      />
+                      {(list.length > 1 || word !== '') && (
+                        <button
+                          type="button"
+                          onClick={() => setStressFields(list.filter((_, j) => j !== i))}
+                          aria-label={`Remove stress word ${i + 1}`}
+                          title="Remove"
+                          className="h-8 w-8 rounded p-0 text-lg leading-none text-gray-500 hover:bg-gray-200 hover:text-gray-900"
+                        >
+                          ×
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void analyzeReference(word)}
+                        disabled={!word.trim() || !audio || shown?.loading}
+                        title={
+                          !audio
+                            ? 'Generate a voice (or pick one from the library) for this question first'
+                            : "Measure this word's stressed syllable and melody in the question's audio"
+                        }
+                        className="rounded border border-gray-300 px-2 py-1 text-sm hover:bg-gray-100 disabled:opacity-50"
+                      >
+                        {shown?.loading ? 'Analyzing…' : 'Analyze reference audio'}
+                      </button>
+                    </div>
+                    {shown?.result && <ReferenceAnalysisView analysis={shown.result} />}
+                    {shown?.error && <p className="m-0 text-sm text-red-600">⚠️ {shown.error}</p>}
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => set('stressWordList', [...list, ''])}
+                className="self-start p-0 text-sm text-blue-700 hover:underline"
+              >
+                + Add a word
+              </button>
+            </fieldset>
+            {stressWords !== '' && (
+              <RatioSlider
+                label="Stress contrast"
+                hint="How much of the reference's contrast between the stressed syllable and the others (within the word) the student must reach. Lower = more lenient."
+                value={value.stressContrastRatio}
+                defaultValue={DEFAULT_STRESS_CONTRAST_RATIO}
+                onChange={(v) => set('stressContrastRatio', v)}
+              />
+            )}
+            {stressWords !== '' && (
+              <p className="m-0 self-center text-sm text-gray-500">
+                Suggestion: 50–60% for beginners, 75% for most classes, 90–100% for advanced students.
+              </p>
+            )}
+            {stressWords !== '' && (
+              <RatioSlider
+                label="Melody match"
+                suffix="similarity"
+                min={0.1}
+                max={0.9}
+                hint="How closely the student's pitch shape through each stress word must follow the reference's to count as 'Same melody'. Higher = stricter. Shown with the results, not counted in the score."
+                value={value.melodyMinSimilarity}
+                defaultValue={DEFAULT_MELODY_MIN_SIMILARITY}
+                onChange={(v) => set('melodyMinSimilarity', v)}
+              />
+            )}
+            {stressWords !== '' && (
+              <p className="m-0 self-center text-sm text-gray-500">Lenient 30–40%, moderate 50%, strict 70% or more.</p>
+            )}
+            {/* Paused: replaced by the Word Syllables Stress Check (code kept, as in the teacher panel). */}
+            {LEGACY_STRESS_ENABLED && (
+              <RatioSlider
+                label="Falling tone"
+                hint="How far an unstressed syllable must drop compared with the reference (e.g. “-ther” in “mother”). Lower = more lenient."
+                value={value.fallMatchRatio}
+                defaultValue={DEFAULT_FALL_MATCH_RATIO}
+                onChange={(v) => set('fallMatchRatio', v)}
+              />
+            )}
+            {/* Paused: sentence-level intonation that spans words (code kept). */}
+            {RISING_TONE_ENABLED && (
+              <RatioSlider
+                label="Rising tone"
+                hint="How far the voice must rise at the end of a Yes/No question compared with the reference. Lower = more lenient."
+                value={value.riseMatchRatio}
+                defaultValue={DEFAULT_RISE_MATCH_RATIO}
+                onChange={(v) => set('riseMatchRatio', v)}
+              />
+            )}
+          </div>
+        </section>
+
+        <button
+          type="button"
+          onClick={() => setShowHelp((v) => !v)}
+          aria-expanded={showHelp}
+          aria-controls="scoring-help"
+          className="self-start rounded border border-blue-600 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-50"
+        >
+          {showHelp ? 'Hide help' : 'Help'}
+        </button>
+        {showHelp && <ScoringHelp onClose={() => setShowHelp(false)} />}
+      </fieldset>
+    </>
   );
 }
 
@@ -397,7 +444,6 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
 
       <p className="rounded bg-white px-2 py-1">
         <strong>Which way is easier?</strong> Stress contrast and Melody match: <strong>lower = more lenient</strong>.
-        Linking tolerance: <strong>higher = more lenient</strong>.
       </p>
 
       <div>
@@ -525,24 +571,19 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
       )}
 
       <div>
-        <h5 className={h}>
-          Linking tolerance (default {DEFAULT_LINK_TOLERANCE}×, shown when Evaluate Connected Speech is on)
-        </h5>
+        <h5 className={h}>Linking (targeted words, shown when Evaluate Connected Speech is on)</h5>
         <p>
-          Checks that words the reference speaker joins smoothly (“is_a”, “mother_is”) are joined by the student too,
-          without a pause. Only the targeted words and the word after each are checked, so Evaluate Connected Speech
-          needs at least one targeted word: the question can't be saved with the box on and Targeted words empty.
+          Checks that the student joins the targeted words to the next word smoothly (“is_a”, “mother_is”), without
+          a pause. It listens to the student's recording only: the reference voice isn't compared, so a question that
+          checks connected speech only (targeted words, no stress words) can be saved without audio. Only the targeted
+          words and the word after each are checked, so Evaluate Connected Speech needs at least one targeted word: the
+          question can't be saved with the box on and Targeted words empty.
         </p>
-        <p className="mt-1">The number is how much longer a pause between linked words may be than the reference's:</p>
-        <ul className="my-0 ml-5 list-disc">
-          <li>1×: up to {LINK_PAUSE_MARGIN_MS} ms extra pause (very strict, a tiny hesitation counts).</li>
-          <li>2×: up to {LINK_PAUSE_MARGIN_MS * 2} ms.</li>
-          <li>3×: up to {LINK_PAUSE_MARGIN_MS * 3} ms.</li>
-        </ul>
         <p className="mt-1">
-          Higher values also accept a slightly larger gap and dip in loudness between the words. A missed link costs 25
-          points on the first word and 20 on the next. Suggested: <strong>1.5–2×</strong> for most classes. With Evaluate
-          Connected Speech off, linking isn't checked or shown at all.
+          The limits are fixed (there's no tolerance to set): a pause of more than about {LINK_MAX_PAUSE_MS} ms between
+          the two words, a stretch of silence, or a clear drop in sound counts as not linked. A missed link costs 25
+          points on the first word and 20 on the next. With Evaluate Connected Speech off, linking isn't checked or
+          shown at all.
         </p>
       </div>
 
@@ -550,36 +591,6 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
         <strong>Tips:</strong> change one setting at a time, and use <em>reset</em> to go back to the default.
       </p>
     </section>
-  );
-}
-
-// The linking tolerance: how much longer a pause between linked words (e.g.
-// "is_a") may be than the reference's, as a multiplier, with the pause it
-// allows, its default and a reset.
-function LinkToleranceSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const pauseMs = (v: number) => Math.round(LINK_PAUSE_MARGIN_MS * v);
-  return (
-    <label
-      className="flex flex-col gap-1"
-      title="How much longer a pause (or a dip in loudness) between linked words may be than in the reference before it counts as not linked. Higher = more lenient."
-    >
-      <span className="text-sm">
-        Linking tolerance: <strong>{value}×</strong> (extra pause up to {pauseMs(value)} ms){' '}
-        <span className="text-gray-500">
-          (default {DEFAULT_LINK_TOLERANCE}× / {pauseMs(DEFAULT_LINK_TOLERANCE)} ms)
-        </span>
-        {value !== DEFAULT_LINK_TOLERANCE && <ResetButton onClick={() => onChange(DEFAULT_LINK_TOLERANCE)} />}
-      </span>
-      <input
-        type="range"
-        min={0.5}
-        max={3}
-        step={0.25}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-48"
-      />
-    </label>
   );
 }
 

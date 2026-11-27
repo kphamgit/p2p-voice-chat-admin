@@ -6,7 +6,7 @@ import { MediaField } from './MediaField';
 import { AudioField } from './AudioField';
 import { plainText, QUESTION_FORMATS, type Audio, type QuestionItem } from './item';
 import { ShadowingScoringOptions } from './ShadowingScoringOptions';
-import { scoringFormFrom, scoringOptionsFrom } from './scoring';
+import { scoringFormFrom, scoringOptionsFrom, isConnectedSpeechOnly } from './scoring';
 import { VoiceField, type VoiceValue } from './VoiceField';
 
 // Modal for authoring an item in an item group. Without an `item` it creates one
@@ -124,6 +124,9 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   // A Shadowing (9) is a plain-text sentence the student repeats after its
   // audio; the server scores the recording against it (Azure).
   const isShadowing = Number(format) === 9;
+  // A Shadowing question needs audio unless it checks Connected Speech only
+  // (targeted words, no stress words): linking is checked in the student's recording alone.
+  const audioRequired = isShadowing && !isConnectedSpeechOnly(scoring);
   // Whether the Audio and Trailing audio sections offer "same as question text" for this format.
   const audioSameAsOffered = SAME_AS_QUESTION_FORMATS.audio.includes(Number(format));
   const trailingSameAsOffered = SAME_AS_QUESTION_FORMATS.trailing.includes(Number(format));
@@ -136,16 +139,20 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
   const audioField = (
     <AudioField
       title={
-        isShadowing ? (
+        audioRequired ? (
           <>
-            Audio <span className="text-red-600">(required)</span>
+            Audio <span className="text-red-600">(required for Stress/Melody check)</span>
           </>
         ) : (
           'Audio (optional)'
         )
       }
       hint={
-        isShadowing ? "The student repeats after this audio, so a Shadowing question can't be saved without it." : undefined
+        audioRequired
+          ? "The student repeats after this audio, so a Shadowing question can't be saved without it (it's optional only when the question checks Connected Speech only: targeted words and no stress words)."
+          : isShadowing
+            ? "Optional: this question checks Connected Speech only (targeted words, no stress words). With audio, the student hears it as a model to repeat, and it helps the pronunciation score; links are checked in the student's recording alone. Without audio, the student just says the sentence."
+            : undefined
       }
       noun="audio"
       value={mainVoice}
@@ -167,7 +174,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
         isEdit={isEdit}
         initialVoice={item?.audio?.voice}
         questionText={audioSameAsOffered || isShadowing ? questionText : undefined}
-        required={isShadowing}
+        required={audioRequired}
         textIsQuestion={isShadowing}
         token={token}
         setError={setError}
@@ -205,12 +212,20 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
     // Evaluate Connected Speech checks the targeted words' links, so it needs one.
     if (isQuestion && isShadowing && scoring.strictConnectedSpeech && !scoring.targetedWords.trim()) {
       setTargetedMissing(true);
-      setError('Evaluate Connected Speech is on: type at least one targeted word (Scoring options), or uncheck it.');
+      setError('Evaluate Connected Speech is on: type at least one targeted word (Connected Speech), or uncheck it.');
       return;
     }
-    // A Shadowing is repeated after its audio, so it can't be saved without one.
-    if (isQuestion && isShadowing && !mainVoice.audio) {
-      setError('A Shadowing question needs audio: generate a voice, or pick one from the library.');
+    // A Shadowing is repeated after its audio, so it can't be saved without one,
+    // unless it checks Connected Speech only (targeted words, no stress words).
+    if (isQuestion && audioRequired && !mainVoice.audio) {
+      setError(
+        'A Shadowing question needs audio: generate a voice, or pick one from the library (it can be left out only when the question checks Connected Speech only: targeted words and no stress words).',
+      );
+      return;
+    }
+    // Hide the text means the student repeats from the audio alone.
+    if (isQuestion && isShadowing && !mainVoice.audio && hideText) {
+      setError('Hide the text needs audio: the student would have nothing to repeat. Uncheck it, or add audio.');
       return;
     }
     if (isQuestion && isShadowing && mainVoice.audio && plainText(questionText) !== mainVoice.audio.text) {
@@ -262,10 +277,12 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
       return;
     }
     // Text typed for a voice that was never generated would be saved without
-    // any audio, so ask for Generate voice first (or the text cleared).
+    // any audio, so ask for Generate voice first (or the text cleared). Not a
+    // Shadowing's audio: its text is always the question text (not typed), and
+    // whether it may be left out was checked above (audioRequired).
     if (isQuestion) {
       const ungenerated = [
-        { name: 'Audio', value: mainVoice, offered: audioSameAsOffered },
+        ...(isShadowing ? [] : [{ name: 'Audio', value: mainVoice, offered: audioSameAsOffered }]),
         { name: 'Trailing audio', value: trailingVoice, offered: trailingSameAsOffered },
       ].find(({ value, offered }) => voiceText(value, offered) && !value.audio);
       if (ungenerated) {
@@ -323,7 +340,7 @@ export function ItemFormModal({ itemGroupId, itemType, item, defaultItemNumber, 
         aria-modal="true"
         aria-labelledby="item-form-heading"
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[90vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg)] p-5 text-left shadow-[var(--shadow)]"
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-3 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg)] p-5 text-left md:px-[100px] shadow-[var(--shadow)]"
       >
         <h3 id="item-form-heading" className="m-0 text-xl font-semibold text-[var(--text-h)]">
           {isEdit ? `Edit item ${item.id}` : 'Add Question Item'}

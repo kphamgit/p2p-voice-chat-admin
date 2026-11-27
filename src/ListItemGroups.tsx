@@ -181,7 +181,7 @@ export default function ListItemGroups({ unit, onBack }: Props) {
             onClick={() => setSelectedItemGroup(info.row.original)}
             className="text-blue-600 underline hover:opacity-80"
           >
-            {info.row.original.item_number}
+            Group {info.row.original.item_number}
           </button>
         ),
       },
